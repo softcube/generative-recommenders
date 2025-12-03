@@ -369,6 +369,11 @@ def train_fn(
         f"Rank {rank}: using training dtype={training_dtype} "
         f"(main_module_bf16={main_module_bf16}) on device={device}."
     )
+    print(
+        f"[DEBUG] rank={rank}, device={device}, training_dtype={training_dtype}, "
+        f"cuda_available={torch.cuda.is_available()}, "
+        f"cuda_device_count={torch.cuda.device_count()}"
+    )
 
     if main_module_bf16:
         model = model.to(torch.bfloat16)
