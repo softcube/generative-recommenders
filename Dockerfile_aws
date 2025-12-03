@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1.4
 
 ARG UBUNTU_VERSION=22.04
-ARG CUDA_VERSION=12.0.0
+# Match the environment used to validate this repo:
+# Ubuntu 22.04, CUDA 12.4, Python 3.10.
+ARG CUDA_VERSION=12.4.0
 ARG CUDA_BUILD_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn8-devel-ubuntu${UBUNTU_VERSION}
 
 FROM ${CUDA_BUILD_IMAGE}
