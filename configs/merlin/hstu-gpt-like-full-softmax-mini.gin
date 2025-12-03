@@ -90,7 +90,7 @@ train_fn.enable_tf32 = True
 # PyTorch/CUDA stack on your server, so keep this disabled here.
 # You can experiment manually by setting this to True once the
 # environment is pinned to compatible versions.
-train_fn.use_torch_compile = False
+train_fn.use_torch_compile = True
 
 # Data loading: use worker subprocesses on GPU servers to reduce CPU bottlenecks.
 # On macOS you can lower num_workers back to 0 if needed.
