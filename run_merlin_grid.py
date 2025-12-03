@@ -128,7 +128,8 @@ def print_summary(results: List[ConfigResult]) -> None:
         "Eval loss",
         "Status",
     ]
-    col_widths = [max(len(h), 22), 8, 8, 8, 8, 8, 8, 10, 8]
+    # Ensure the first column is wide enough for long config names.
+    col_widths = [max(len(headers[0]), 22), 8, 8, 8, 8, 8, 8, 10, 8]
 
     def fmt_row(cols: List[str]) -> str:
         return (
