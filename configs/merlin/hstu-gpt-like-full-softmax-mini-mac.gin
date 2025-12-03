@@ -1,17 +1,13 @@
-# HSTU config approximating your small GPT-style transformer
-# on Merlin session data in tmp/merlin, using full softmax loss
-# and event-type features as extra inputs.
+# HSTU config for Merlin data on macOS / MPS.
+# - Smaller batch sizes to fit typical laptop GPUs.
+# - Single-process data loading (num_workers=0).
 #
-# This lets you compare:
-#   - HSTU vs SASRec (Transformer) at similar scale
-#   - Both with FullSoftmaxLoss and rated inputs on the same data.
-#
-# Preprocessing (no prefix expansion; expand_sequences_to_prefixes=False):
+# Preprocessing:
 #   python3 preprocess_merlin_data.py
 #
 # Run training as:
 #   python3 main.py \
-#     --gin_config_file=configs/merlin/hstu-gpt-like-full-softmax-mini.gin \
+#     --gin_config_file=configs/merlin/hstu-gpt-like-full-softmax-mini-mac.gin \
 #     --master_port=12345
 
 train_fn.dataset_name = "merlin"
@@ -22,10 +18,9 @@ train_fn.max_sequence_length = 20
 # No extra generative outputs beyond next-item prediction.
 train_fn.gr_output_length = 0
 
-# Keep batch size modest for CPU/MPS (can be reduced if needed).
-# For GPU servers (e.g., A10G 24GB), 1024 is usually safe; lower if you hit OOM.
-train_fn.local_batch_size = 4096
-train_fn.eval_batch_size = 1024
+# Smaller batch sizes for laptop-class hardware.
+train_fn.local_batch_size = 256
+train_fn.eval_batch_size = 128
 
 # Use HSTU as the main module.
 train_fn.main_module = "HSTU"
@@ -86,7 +81,7 @@ train_fn.throughput_log_interval = 100
 
 train_fn.enable_tf32 = True
 
-# Data loading: use worker subprocesses on GPU servers to reduce CPU bottlenecks.
-# On macOS you can lower num_workers back to 0 if needed.
-create_data_loader.prefetch_factor = 2
-create_data_loader.num_workers = 8
+# Single-process, no worker subprocesses for macOS.
+create_data_loader.prefetch_factor = None
+create_data_loader.num_workers = 0
+
