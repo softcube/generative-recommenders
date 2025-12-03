@@ -21,7 +21,7 @@ import random
 import sys
 import time
 
-from datetime import date
+from datetime import date, datetime
 from typing import Dict, Optional
 
 import gin
@@ -169,9 +169,20 @@ def train_fn(
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     if not logger.handlers:
+        class _AbslStyleFormatter(logging.Formatter):
+            def formatTime(self, record, datefmt=None):
+                dt = datetime.fromtimestamp(record.created)
+                if datefmt:
+                    return dt.strftime(datefmt)
+                # Default to MMDD HH:MM:SS.UUUUUU similar to absl.
+                return dt.strftime("%m%d %H:%M:%S.%f")
+
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(logging.INFO)
-        formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+        formatter = _AbslStyleFormatter(
+            fmt="%(levelname).1s%(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s",
+            datefmt="%m%d %H:%M:%S.%f",
+        )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
@@ -190,6 +201,16 @@ def train_fn(
         chronological=True,
         positional_sampling_ratio=positional_sampling_ratio,
     )
+
+    # Log dataset sizes before creating data loaders / starting training.
+    try:
+        train_size = len(dataset.train_dataset)
+        valid_size = len(dataset.eval_dataset)
+        logging.info(
+            f"Dataset sizes (rank {rank}): train={train_size}, valid={valid_size}"
+        )
+    except Exception:
+        logging.warning("Failed to compute train/valid dataset sizes for logging.")
 
     train_data_sampler, train_data_loader = create_data_loader(
         dataset.train_dataset,
@@ -226,6 +247,17 @@ def train_fn(
             shift_id_by=1,
             chronological=True,
         )
+        # Log test dataset size for Merlin.
+        try:
+            test_size = len(test_dataset)
+            train_size = len(dataset.train_dataset)
+            valid_size = len(dataset.eval_dataset)
+            logging.info(
+                f"Dataset sizes (rank {rank}): train={train_size}, "
+                f"valid={valid_size}, test={test_size}"
+            )
+        except Exception:
+            logging.warning("Failed to compute test dataset size for logging.")
         _, test_data_loader = create_data_loader(
             test_dataset,
             batch_size=eval_batch_size,
