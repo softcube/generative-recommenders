@@ -364,6 +364,12 @@ def train_fn(
     else:
         device = torch.device("cpu")
 
+    training_dtype = torch.bfloat16 if main_module_bf16 else torch.float32
+    logging.info(
+        f"Rank {rank}: using training dtype={training_dtype} "
+        f"(main_module_bf16={main_module_bf16}) on device={device}."
+    )
+
     if main_module_bf16:
         model = model.to(torch.bfloat16)
 

@@ -35,8 +35,8 @@ train_fn.use_rated_input_preproc = True
 train_fn.rating_embedding_dim = 8
 train_fn.num_ratings = 6
 
-# Small multi-epoch run.
-train_fn.num_epochs = 10
+# Single-epoch run for quick experiments.
+train_fn.num_epochs = 1
 
 # Match GPT hidden size (model dim) of 512.
 train_fn.item_embedding_dim = 512
