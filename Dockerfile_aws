@@ -50,8 +50,8 @@ WORKDIR /workspace
 COPY requirements.txt ./requirements.txt
 
 # Install Python dependencies (including torch / torchrec / fbgemm_gpu)
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip && \
+# Note: keep this compatible with Docker setups that do NOT use BuildKit.
+RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
 # Copy project files
