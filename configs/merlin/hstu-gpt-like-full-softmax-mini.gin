@@ -86,6 +86,9 @@ train_fn.throughput_log_interval = 100
 
 train_fn.enable_tf32 = True
 
+# Enable torch.compile() on CUDA to optimize the model.
+train_fn.use_torch_compile = True
+
 # Data loading: use worker subprocesses on GPU servers to reduce CPU bottlenecks.
 # On macOS you can lower num_workers back to 0 if needed.
 #create_data_loader.prefetch_factor = 2

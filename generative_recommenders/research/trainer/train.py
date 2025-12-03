@@ -169,21 +169,30 @@ def train_fn(
     # (e.g., under torch.multiprocessing.spawn on GPU servers).
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        class _AbslStyleFormatter(logging.Formatter):
-            def formatTime(self, record, datefmt=None):
-                dt = datetime.fromtimestamp(record.created)
-                if datefmt:
-                    return dt.strftime(datefmt)
-                # Default to MMDD HH:MM:SS.UUUUUU similar to absl.
-                return dt.strftime("%m%d %H:%M:%S.%f")
 
+    class _AbslStyleFormatter(logging.Formatter):
+        def formatTime(self, record, datefmt=None):
+            dt = datetime.fromtimestamp(record.created)
+            if datefmt:
+                return dt.strftime(datefmt)
+            # Default to MMDD HH:MM:SS.UUUUUU similar to absl.
+            return dt.strftime("%m%d %H:%M:%S.%f")
+
+    formatter = _AbslStyleFormatter(
+        fmt="%(levelname).1s%(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s",
+        datefmt="%m%d %H:%M:%S.%f",
+    )
+
+    if logger.handlers:
+        # Update existing handlers (e.g., configured by basicConfig) to use
+        # an absl-style formatter so logs are consistent across environments.
+        for handler in logger.handlers:
+            handler.setLevel(logging.INFO)
+            handler.setFormatter(formatter)
+    else:
+        # If no handlers exist yet, attach our own stream handler.
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(logging.INFO)
-        formatter = _AbslStyleFormatter(
-            fmt="%(levelname).1s%(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s",
-            datefmt="%m%d %H:%M:%S.%f",
-        )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
