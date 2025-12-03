@@ -430,11 +430,237 @@ class AmazonDataProcessor(DataProcessor):
         return num_unique_items
 
 
+class MerlinParquetDataProcessor(DataProcessor):
+    """
+    Data processor for Merlin-style session data stored in Parquet files
+    under tmp/merlin/*.parquet.
+
+    Expects columns:
+        - item_id_list_seq: List[int]
+        - item_event_name_list_seq: List[int] (unused for now)
+        - user_session: session/user identifier
+        - timestamp_first: int timestamp for the first event in the sequence
+    """
+
+    def __init__(
+        self,
+        prefix: str,
+        base_dir: str,
+        expected_num_unique_items: Optional[int] = None,
+        expand_sequences_to_prefixes: bool = False,
+    ) -> None:
+        super().__init__(
+            prefix=prefix,
+            expected_num_unique_items=expected_num_unique_items,
+            expected_max_item_id=None,
+        )
+        self._base_dir: str = base_dir
+        self._num_unique_items: Optional[int] = expected_num_unique_items
+        self._num_event_types: Optional[int] = None
+        # When True, each original sequence [i1, ..., iT] will be expanded
+        # into multiple prefix subsequences [i1, i2], [i1, i2, i3], ...,
+        # [i1, ..., iT]. This is useful when you want the preprocessor
+        # itself to materialize many (history, target) pairs per row.
+        # By default this is disabled and we keep the original behavior
+        # of one sequence per row.
+        self._expand_sequences_to_prefixes: bool = expand_sequences_to_prefixes
+
+    def expected_num_unique_items(self) -> Optional[int]:
+        return self._num_unique_items
+
+    def expected_max_item_id(self) -> Optional[int]:
+        if self._num_unique_items is None:
+            return None
+        # We remap item ids to [0..num_unique_items-1].
+        return self._num_unique_items - 1
+
+    def processed_item_csv(self) -> str:
+        # Merlin data currently does not have side features; this is unused.
+        return f"tmp/processed/{self._prefix}/items.csv"
+
+    def num_event_types(self) -> Optional[int]:
+        return self._num_event_types
+
+    def sasrec_format_csv_train(self) -> str:
+        return f"tmp/{self._prefix}/sasrec_format_train.csv"
+
+    def sasrec_format_csv_valid(self) -> str:
+        return f"tmp/{self._prefix}/sasrec_format_valid.csv"
+
+    def sasrec_format_csv_test(self) -> str:
+        return f"tmp/{self._prefix}/sasrec_format_test.csv"
+
+    def preprocess_rating(self) -> int:
+        import itertools
+
+        dfs = {}
+        for split in ["train", "valid", "test"]:
+            path = os.path.join(self._base_dir, f"{split}.parquet")
+            if os.path.exists(path):
+                df = pd.read_parquet(path)
+                df = df.copy()
+                df["__split"] = split
+                dfs[split] = df
+            else:
+                logging.warning(f"Merlin split not found: {path}")
+
+        if not dfs:
+            raise FileNotFoundError(
+                f"No Parquet files found under {self._base_dir} for Merlin dataset."
+            )
+
+        data = pd.concat(dfs.values(), ignore_index=True)
+
+        # Ensure required columns exist.
+        required_cols = [
+            "item_id_list_seq",
+            "item_event_name_list_seq",
+            "user_session",
+            "timestamp_first",
+        ]
+        missing = [c for c in required_cols if c not in data.columns]
+        if missing:
+            raise ValueError(f"Merlin data missing required columns: {missing}")
+
+        # Remap item ids to a contiguous range [0..num_items-1].
+        all_item_ids = set(
+            itertools.chain.from_iterable(data["item_id_list_seq"].tolist())
+        )
+        remapped_item_ids = {
+            old_id: idx for idx, old_id in enumerate(sorted(all_item_ids))
+        }
+        self._num_unique_items = len(remapped_item_ids)
+
+        def remap_items(seq):
+            return [remapped_item_ids[int(x)] for x in seq]
+
+        data["item_ids"] = data["item_id_list_seq"].apply(remap_items)
+
+        # Remap event types (item_event_name_list_seq) to a contiguous range
+        # [0..num_event_types-1] and use them as "ratings" (extra features).
+        all_event_ids = set(
+            itertools.chain.from_iterable(
+                data["item_event_name_list_seq"].tolist()
+            )
+        )
+        remapped_event_ids = {
+            old_id: idx for idx, old_id in enumerate(sorted(all_event_ids))
+        }
+        self._num_event_types = len(remapped_event_ids)
+
+        def remap_events(seq):
+            return [remapped_event_ids[int(x)] for x in seq]
+
+        data["ratings"] = data["item_event_name_list_seq"].apply(remap_events)
+
+        # Construct synthetic per-event timestamps: start at timestamp_first and
+        # increment by 1 for each subsequent event to preserve ordering.
+        def build_timestamps(row):
+            base = int(row["timestamp_first"])
+            seq = row["item_ids"]
+            return [base + i for i in range(len(seq))]
+
+        data["timestamps"] = data.apply(build_timestamps, axis=1)
+
+        # Map user_session to integer user_id.
+        data["user_id"] = pd.Categorical(data["user_session"]).codes
+
+        seq_ratings_data = data[
+            ["user_id", "item_ids", "ratings", "timestamps", "__split"]
+        ].copy()
+
+        # Optionally filter out very short sequences (e.g., length < 2).
+        seq_ratings_data = seq_ratings_data[
+            seq_ratings_data["item_ids"].apply(len) >= 2
+        ]
+
+        # Optionally expand each full sequence [i1, ..., iT] into multiple
+        # prefix subsequences [i1, i2], [i1, i2, i3], ..., [i1, ..., iT].
+        # This lets you approximate the "sliding window" style supervision
+        # directly at the preprocessing stage while keeping the DatasetV2
+        # logic unchanged. Disabled by default.
+        if self._expand_sequences_to_prefixes:
+            expanded_rows = []
+            for _, row in seq_ratings_data.iterrows():
+                user_id = row["user_id"]
+                item_ids = row["item_ids"]
+                ratings = row["ratings"]
+                timestamps = row["timestamps"]
+                split = row["__split"]
+
+                seq_len = len(item_ids)
+                # We already filtered len >= 2 above. Generate prefixes
+                # of length >= 2 so there is at least one historical item
+                # and one target per subsequence.
+                for prefix_len in range(2, seq_len + 1):
+                    expanded_rows.append(
+                        {
+                            "user_id": user_id,
+                            "item_ids": item_ids[:prefix_len],
+                            "ratings": ratings[:prefix_len],
+                            "timestamps": timestamps[:prefix_len],
+                            "__split": split,
+                        }
+                    )
+
+            if expanded_rows:
+                seq_ratings_data = pd.DataFrame.from_records(expanded_rows)
+
+        # Basic stats.
+        result = pd.DataFrame([[]])
+        for col in ["item_ids"]:
+            result[col + "_mean"] = seq_ratings_data[col].apply(len).mean()
+            result[col + "_min"] = seq_ratings_data[col].apply(len).min()
+            result[col + "_max"] = seq_ratings_data[col].apply(len).max()
+        logging.info(self._prefix)
+        logging.info(result.to_string(index=False))
+
+        # Ensure output dir exists.
+        if not os.path.exists(f"tmp/{self._prefix}"):
+            os.makedirs(f"tmp/{self._prefix}")
+
+        # Convert to SASRec CSV format with sequence_* columns.
+        # 1) Combined (for debugging / legacy use).
+        combined = seq_ratings_data.drop(columns=["__split"])
+        combined_csv = self.to_seq_data(combined)
+        combined_csv.sample(frac=1).reset_index(drop=True).to_csv(
+            self.output_format_csv(), index=False, sep=","
+        )
+
+        # 2) Per-split CSVs.
+        split_to_path = {
+            "train": self.sasrec_format_csv_train(),
+            "valid": self.sasrec_format_csv_valid(),
+            "test": self.sasrec_format_csv_test(),
+        }
+        for split, path in split_to_path.items():
+            split_df = seq_ratings_data[seq_ratings_data["__split"] == split].drop(
+                columns=["__split"]
+            )
+            if split_df.empty:
+                logging.warning(f"Merlin {split} split is empty; skipping {path}")
+                continue
+            split_seq = self.to_seq_data(split_df)
+            split_seq.sample(frac=1).reset_index(drop=True).to_csv(
+                path, index=False, sep=","
+            )
+            logging.info(
+                f"{self._prefix} {split}: num_sequences={split_seq.shape[0]}"
+            )
+
+        logging.info(
+            f"{self._prefix}: num_unique_items={self._num_unique_items}, "
+            f"num_sequences_total={combined_csv.shape[0]}"
+        )
+
+        return self._num_unique_items or 0
+
+
 def get_common_preprocessors() -> (
     Dict[
         str,
         Union[
-            AmazonDataProcessor, MovielensDataProcessor, MovielensSyntheticDataProcessor
+            AmazonDataProcessor, MovielensDataProcessor, MovielensSyntheticDataProcessor, MerlinParquetDataProcessor
         ],
     ]
 ):
@@ -471,10 +697,16 @@ def get_common_preprocessors() -> (
         prefix="amzn_books",
         expected_num_unique_items=695762,
     )
+    merlin_dp = MerlinParquetDataProcessor(  # pyre-ignore [45]
+        prefix="merlin",
+        base_dir="tmp/merlin",
+        expected_num_unique_items=None,
+    )
     return {
         "ml-1m": ml_1m_dp,
         "ml-20m": ml_20m_dp,
         "ml-1b": ml_1b_dp,
         "ml-3b": ml_3b_dp,
         "amzn-books": amzn_books_dp,
+        "merlin": merlin_dp,
     }

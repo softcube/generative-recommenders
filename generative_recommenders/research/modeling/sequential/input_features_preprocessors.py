@@ -102,7 +102,11 @@ class LearnablePositionalEmbeddingRatedInputFeaturesPreprocessor(
     ) -> None:
         super().__init__()
 
-        self._embedding_dim: int = item_embedding_dim + rating_embedding_dim
+        # The downstream encoder (SASRec/HSTU) expects inputs of dimension
+        # `item_embedding_dim`. We first concatenate [item_emb || rating_emb]
+        # and then project back to `item_embedding_dim`.
+        self._embedding_dim: int = item_embedding_dim
+        self._input_dim: int = item_embedding_dim + rating_embedding_dim
         self._pos_emb: torch.nn.Embedding = torch.nn.Embedding(
             max_sequence_len,
             self._embedding_dim,
@@ -112,6 +116,11 @@ class LearnablePositionalEmbeddingRatedInputFeaturesPreprocessor(
         self._rating_emb: torch.nn.Embedding = torch.nn.Embedding(
             num_ratings,
             rating_embedding_dim,
+        )
+        # Linear projection from concatenated [item_emb || rating_emb]
+        # back to the model dimension expected by the encoder.
+        self._proj: torch.nn.Linear = torch.nn.Linear(
+            self._input_dim, self._embedding_dim
         )
         self.reset_state()
 
@@ -139,10 +148,16 @@ class LearnablePositionalEmbeddingRatedInputFeaturesPreprocessor(
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, N = past_ids.size()
 
-        user_embeddings = torch.cat(
+        # Concatenate item and rating embeddings, then project back to
+        # the model dimension so that downstream encoders see a tensor
+        # of shape [B, N, item_embedding_dim].
+        concat_embeddings = torch.cat(
             [past_embeddings, self._rating_emb(past_payloads["ratings"].int())],
             dim=-1,
-        ) * (self._embedding_dim**0.5) + self._pos_emb(
+        )  # [B, N, D_item + D_rating]
+        user_embeddings = self._proj(concat_embeddings) * (
+            self._embedding_dim**0.5
+        ) + self._pos_emb(
             torch.arange(N, device=past_ids.device).unsqueeze(0).repeat(B, 1)
         )
         user_embeddings = self._emb_dropout(user_embeddings)

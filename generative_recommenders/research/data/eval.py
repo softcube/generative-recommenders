@@ -168,6 +168,11 @@ def eval_metrics_v2_from_tensors(
             torch.div(1.0, torch.log2(eval_ranks + 1)),
             torch.zeros(1, dtype=torch.float32, device=device),
         ),
+        "ndcg@5": torch.where(
+            eval_ranks <= 5,
+            torch.div(1.0, torch.log2(eval_ranks + 1)),
+            torch.zeros(1, dtype=torch.float32, device=device),
+        ),
         "ndcg@10": torch.where(
             eval_ranks <= 10,
             torch.div(1.0, torch.log2(eval_ranks + 1)),
@@ -189,6 +194,7 @@ def eval_metrics_v2_from_tensors(
             torch.zeros(1, dtype=torch.float32, device=device),
         ),
         "hr@1": (eval_ranks <= 1),
+        "hr@5": (eval_ranks <= 5),
         "hr@10": (eval_ranks <= 10),
         "hr@50": (eval_ranks <= 50),
         "hr@100": (eval_ranks <= 100),

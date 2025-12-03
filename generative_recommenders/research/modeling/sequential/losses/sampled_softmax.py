@@ -191,3 +191,85 @@ class SampledSoftmaxLoss(AutoregressiveLoss):
                 negatives_sampler=negatives_sampler,
                 **kwargs,
             )
+
+
+class FullSoftmaxLoss(AutoregressiveLoss):
+    """
+    Full softmax loss over the entire item catalog.
+
+    This computes a cross-entropy loss where, for each (user, position),
+    the model must assign the highest probability to the true item among
+    all items in the embedding table.
+    """
+
+    def __init__(
+        self,
+        softmax_temperature: float,
+        model,
+    ) -> None:
+        super().__init__()
+        self._softmax_temperature: float = softmax_temperature
+        self._model = model
+
+    def forward(  # pyre-ignore [15]
+        self,
+        lengths: torch.Tensor,
+        output_embeddings: torch.Tensor,
+        supervision_ids: torch.Tensor,
+        supervision_embeddings: torch.Tensor,
+        supervision_weights: torch.Tensor,
+        negatives_sampler: NegativesSampler,
+        **kwargs,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        """
+        Args:
+            lengths: [B] x int32 representing number of non-zero elements per row.
+            output_embeddings: [B, N, D] x float, embeddings for the current
+                input sequence.
+            supervision_ids: [B, N] x int64, (positive) supervision ids.
+            supervision_embeddings: [B, N, D] x float. Unused for full softmax.
+            supervision_weights: Optional [B, N] x float. Weights/mask.
+            negatives_sampler: Unused here; included for API compatibility.
+
+        Returns:
+            Tuple of (loss, empty aux_losses dict).
+        """
+        del lengths, supervision_embeddings, negatives_sampler, kwargs
+
+        device = output_embeddings.device
+        B, N, D = output_embeddings.shape
+
+        # Mask valid positions (weights > 0).
+        valid_mask = supervision_weights > 0
+        if not torch.any(valid_mask):
+            return torch.tensor(0.0, device=device), {}
+
+        # Flatten valid positions.
+        flat_outputs = output_embeddings[valid_mask]  # [N_valid, D]
+        flat_targets = supervision_ids[valid_mask].long()  # [N_valid]
+        flat_weights = supervision_weights[valid_mask]  # [N_valid]
+
+        # Get global item embeddings from the model's embedding module.
+        # Assumes a LocalEmbeddingModule-style interface.
+        item_emb = self._model._embedding_module._item_emb.weight  # type: ignore[attr-defined]
+        item_emb = item_emb.to(device=device, dtype=flat_outputs.dtype)
+
+        if item_emb.size(1) != D:
+            item_emb = item_emb[:, :D]
+
+        # [N_valid, num_items]
+        logits = flat_outputs @ item_emb.t()
+        logits = logits / self._softmax_temperature
+
+        # Cross-entropy over the full catalog.
+        per_position_loss = F.cross_entropy(
+            logits,
+            flat_targets,
+            reduction="none",
+        )
+
+        # Apply supervision weights (e.g., mask padded positions).
+        weighted_loss = per_position_loss * flat_weights
+        loss = weighted_loss.sum() / flat_weights.sum().clamp_min(1e-8)
+
+        return loss, {}

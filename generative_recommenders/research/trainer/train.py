@@ -57,6 +57,7 @@ from generative_recommenders.research.modeling.sequential.input_features_preproc
 )
 from generative_recommenders.research.modeling.sequential.losses.sampled_softmax import (
     SampledSoftmaxLoss,
+    FullSoftmaxLoss,
 )
 from generative_recommenders.research.modeling.sequential.output_postprocessors import (
     L2NormEmbeddingPostprocessor,
@@ -70,16 +71,40 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
 
+class _IdentityDDP(torch.nn.Module):
+    """
+    Lightweight wrapper that mimics DistributedDataParallel's .module API
+    for the single-process (world_size == 1) case without initializing
+    torch.distributed or using any collective ops.
+    """
+
+    def __init__(self, module: torch.nn.Module) -> None:
+        super().__init__()
+        self.module = module
+
+    def forward(self, *args, **kwargs):
+        return self.module(*args, **kwargs)
+
+    def __getattr__(self, name):
+        if name == "module":
+            return super().__getattr__(name)
+        return getattr(self.module, name)
+
+
 def setup(rank: int, world_size: int, master_port: int) -> None:
+    if world_size <= 1:
+        return
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = str(master_port)
 
     # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    backend = "nccl" if torch.cuda.is_available() else "gloo"
+    dist.init_process_group(backend, rank=rank, world_size=world_size)
 
 
 def cleanup() -> None:
-    dist.destroy_process_group()
+    if dist.is_initialized():
+        dist.destroy_process_group()
 
 
 @gin.configurable
@@ -100,7 +125,7 @@ def train_fn(
     rank: int,
     world_size: int,
     master_port: int,
-    dataset_name: str = "ml-20m",
+    dataset_name: str = "ml-1m",
     max_sequence_length: int = 200,
     positional_sampling_ratio: float = 1.0,
     local_batch_size: int = 128,
@@ -110,6 +135,9 @@ def train_fn(
     main_module_bf16: bool = False,
     dropout_rate: float = 0.2,
     user_embedding_norm: str = "l2_norm",
+    use_rated_input_preproc: bool = False,
+    rating_embedding_dim: int = 8,
+    num_ratings: int = 0,
     sampling_strategy: str = "in-batch",
     loss_module: str = "SampledSoftmaxLoss",
     loss_weights: Optional[Dict[str, float]] = {},
@@ -123,6 +151,7 @@ def train_fn(
     weight_decay: float = 1e-3,
     top_k_method: str = "MIPSBruteForceTopK",
     eval_interval: int = 100,
+    throughput_log_interval: int = 100,
     full_eval_every_n: int = 1,
     save_ckpt_every_n: int = 1000,
     partial_eval_num_iters: int = 32,
@@ -167,6 +196,33 @@ def train_fn(
         drop_last=world_size > 1,
     )
 
+    # Optional test loader (currently only for 'merlin', using a dedicated test split).
+    test_data_loader = None
+    if dataset_name == "merlin":
+        from generative_recommenders.research.data.preprocessor import (  # pyre-ignore[E402]
+            get_common_preprocessors as _get_common_preprocessors,
+        )
+        from generative_recommenders.research.data.dataset import (  # pyre-ignore[E402]
+            DatasetV2 as _DatasetV2,
+        )
+
+        merlin_dp = _get_common_preprocessors()["merlin"]
+        test_dataset = _DatasetV2(
+            ratings_file=merlin_dp.sasrec_format_csv_test(),
+            padding_length=max_sequence_length + 1,
+            ignore_last_n=0,
+            shift_id_by=1,
+            chronological=True,
+        )
+        _, test_data_loader = create_data_loader(
+            test_dataset,
+            batch_size=eval_batch_size,
+            world_size=world_size,
+            rank=rank,
+            shuffle=False,
+            drop_last=world_size > 1,
+        )
+
     model_debug_str = main_module
     if embedding_module_type == "local":
         embedding_module: EmbeddingModule = LocalEmbeddingModule(
@@ -197,11 +253,29 @@ def train_fn(
             eps=1e-6,
         )
     )
-    input_preproc_module = LearnablePositionalEmbeddingInputFeaturesPreprocessor(
-        max_sequence_len=dataset.max_sequence_length + gr_output_length + 1,
-        embedding_dim=item_embedding_dim,
-        dropout_rate=dropout_rate,
-    )
+    if use_rated_input_preproc:
+        from generative_recommenders.research.modeling.sequential.input_features_preprocessors import (  # noqa: E501
+            LearnablePositionalEmbeddingRatedInputFeaturesPreprocessor,
+        )
+
+        if num_ratings <= 0:
+            raise ValueError(
+                "use_rated_input_preproc=True requires num_ratings > 0 "
+                "(set train_fn.num_ratings in your gin config)."
+            )
+        input_preproc_module = LearnablePositionalEmbeddingRatedInputFeaturesPreprocessor(  # noqa: E501
+            max_sequence_len=dataset.max_sequence_length + gr_output_length + 1,
+            item_embedding_dim=item_embedding_dim,
+            dropout_rate=dropout_rate,
+            rating_embedding_dim=rating_embedding_dim,
+            num_ratings=num_ratings,
+        )
+    else:
+        input_preproc_module = LearnablePositionalEmbeddingInputFeaturesPreprocessor(
+            max_sequence_len=dataset.max_sequence_length + gr_output_length + 1,
+            embedding_dim=item_embedding_dim,
+            dropout_rate=dropout_rate,
+        )
 
     model = get_sequential_encoder(
         module_type=main_module,
@@ -221,6 +295,7 @@ def train_fn(
         loss_debug_str = loss_debug_str[:-4]
         assert temperature == 1.0
         ar_loss = BCELoss(temperature=temperature, model=model)
+        uses_explicit_negatives = True
     elif loss_module == "SampledSoftmaxLoss":
         loss_debug_str = "ssl"
         if temperature != 1.0:
@@ -234,39 +309,76 @@ def train_fn(
         loss_debug_str += (
             f"-n{num_negatives}{'-ac' if loss_activation_checkpoint else ''}"
         )
+        uses_explicit_negatives = True
+    elif loss_module == "FullSoftmaxLoss":
+        loss_debug_str = "fsm"
+        if temperature != 1.0:
+            loss_debug_str += f"-t{temperature}"
+        ar_loss = FullSoftmaxLoss(
+            softmax_temperature=temperature,
+            model=model,
+        )
+        # Full softmax does not require explicit negative sampling.
+        uses_explicit_negatives = False
     else:
         raise ValueError(f"Unrecognized loss module {loss_module}.")
 
     # sampling
-    if sampling_strategy == "in-batch":
-        negatives_sampler = InBatchNegativesSampler(
-            l2_norm=item_l2_norm,
-            l2_norm_eps=l2_norm_eps,
-            dedup_embeddings=True,
-        )
-        sampling_debug_str = (
-            f"in-batch{f'-l2-eps{l2_norm_eps}' if item_l2_norm else ''}-dedup"
-        )
-    elif sampling_strategy == "local":
-        negatives_sampler = LocalNegativesSampler(
-            num_items=dataset.max_item_id,
-            item_emb=model._embedding_module._item_emb,
-            all_item_ids=dataset.all_item_ids,
-            l2_norm=item_l2_norm,
-            l2_norm_eps=l2_norm_eps,
-        )
-    else:
-        raise ValueError(f"Unrecognized sampling strategy {sampling_strategy}.")
-    sampling_debug_str = negatives_sampler.debug_str()
+    if uses_explicit_negatives:
+        if sampling_strategy == "in-batch":
+            negatives_sampler = InBatchNegativesSampler(
+                l2_norm=item_l2_norm,
+                l2_norm_eps=l2_norm_eps,
+                dedup_embeddings=True,
+            )
+            sampling_debug_str = (
+                f"in-batch{f'-l2-eps{l2_norm_eps}' if item_l2_norm else ''}-dedup"
+            )
+        elif sampling_strategy == "local":
+            negatives_sampler = LocalNegativesSampler(
+                num_items=dataset.max_item_id,
+                item_emb=model._embedding_module._item_emb,
+                all_item_ids=dataset.all_item_ids,
+                l2_norm=item_l2_norm,
+                l2_norm_eps=l2_norm_eps,
+            )
+        else:
+            raise ValueError(f"Unrecognized sampling strategy {sampling_strategy}.")
 
-    # Creates model and moves it to GPU with id rank
-    device = rank
+        sampling_debug_str = negatives_sampler.debug_str()
+    else:
+        # FullSoftmaxLoss: negatives are implicit; keep a placeholder sampler
+        # object only to satisfy the training loop API.
+        negatives_sampler = InBatchNegativesSampler(
+            l2_norm=False,
+            l2_norm_eps=l2_norm_eps,
+            dedup_embeddings=False,
+        )
+        sampling_debug_str = "no-explicit-negatives"
+
+    # Creates model and moves it to the appropriate device
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{rank}")
+    elif torch.backends.mps.is_available():  # type: ignore[attr-defined]
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+
     if main_module_bf16:
         model = model.to(torch.bfloat16)
+
     model = model.to(device)
     ar_loss = ar_loss.to(device)
     negatives_sampler = negatives_sampler.to(device)
-    model = DDP(model, device_ids=[rank], broadcast_buffers=False)
+    if world_size > 1:
+        if torch.cuda.is_available():
+            model = DDP(model, device_ids=[rank], broadcast_buffers=False)
+        else:
+            # CPU/MPS DDP: let PyTorch infer device placement without explicit device_ids.
+            model = DDP(model, device_ids=None, broadcast_buffers=False)
+    else:
+        # Single-process: avoid distributed overhead, but keep .module API.
+        model = _IdentityDDP(model)
 
     # TODO: wrap in create_optimizer.
     opt = torch.optim.AdamW(
@@ -299,11 +411,19 @@ def train_fn(
         logging.info(f"Rank {rank}: disabling summary writer")
 
     last_training_time = time.time()
+    last_throughput_time = last_training_time
+    num_train_batches = len(train_data_loader)
+    effective_batch_size = local_batch_size * world_size
     torch.autograd.set_detect_anomaly(True)
 
     batch_id = 0
     epoch = 0
     for epoch in range(num_epochs):
+        running_loss: float = 0.0
+        running_batches: int = 0
+        epoch_start_time = time.time()
+        epoch_batches_done = 0
+        last_throughput_time = epoch_start_time
         if train_data_sampler is not None:
             train_data_sampler.set_epoch(epoch)
         if eval_data_sampler is not None:
@@ -346,7 +466,9 @@ def train_fn(
                 )
                 logging.info(
                     f"rank {rank}:  batch-stat (eval): iter {batch_id} (epoch {epoch}): "
-                    + f"NDCG@10 {_avg(eval_dict['ndcg@10'], world_size):.4f}, "
+                    + f"NDCG@5 {_avg(eval_dict['ndcg@5'], world_size):.4f}, "
+                    f"NDCG@10 {_avg(eval_dict['ndcg@10'], world_size):.4f}, "
+                    f"HR@5 {_avg(eval_dict['hr@5'], world_size):.4f}, "
                     f"HR@10 {_avg(eval_dict['hr@10'], world_size):.4f}, "
                     f"HR@50 {_avg(eval_dict['hr@50'], world_size):.4f}, "
                     + f"MRR {_avg(eval_dict['mrr'], world_size):.4f} "
@@ -372,18 +494,20 @@ def train_fn(
 
             supervision_ids = seq_features.past_ids
 
-            if sampling_strategy == "in-batch":
-                # get_item_embeddings currently assume 1-d tensor.
-                in_batch_ids = supervision_ids.view(-1)
-                negatives_sampler.process_batch(
-                    ids=in_batch_ids,
-                    presences=(in_batch_ids != 0),
-                    embeddings=model.module.get_item_embeddings(in_batch_ids),
-                )
-            else:
-                # pyre-fixme[16]: `InBatchNegativesSampler` has no attribute
-                #  `_item_emb`.
-                negatives_sampler._item_emb = model.module._embedding_module._item_emb
+            if uses_explicit_negatives:
+                if sampling_strategy == "in-batch":
+                    # get_item_embeddings currently assume 1-d tensor.
+                    in_batch_ids = supervision_ids.view(-1)
+                    negatives_sampler.process_batch(
+                        ids=in_batch_ids,
+                        presences=(in_batch_ids != 0),
+                        embeddings=model.module.get_item_embeddings(in_batch_ids),
+                    )
+                else:
+                    # Local sampler: use the item embedding table.
+                    negatives_sampler._item_emb = (  # pyre-ignore[16]
+                        model.module._embedding_module._item_emb
+                    )
 
             ar_mask = supervision_ids[:, 1:] != 0
             loss, aux_losses = ar_loss(
@@ -428,7 +552,50 @@ def train_fn(
 
             opt.step()
 
+            # Track running loss for epoch-level statistics.
+            running_loss += float(loss.detach().item())
+            running_batches += 1
+
             batch_id += 1
+            epoch_batches_done += 1
+
+            if (
+                throughput_log_interval > 0
+                and batch_id > 0
+                and (batch_id % throughput_log_interval) == 0
+                and rank == 0
+            ):
+                now = time.time()
+                epoch_elapsed = max(now - epoch_start_time, 1e-6)
+                interval_elapsed = max(now - last_throughput_time, 1e-6)
+
+                avg_examples_per_sec = (
+                    effective_batch_size * epoch_batches_done / epoch_elapsed
+                )
+                current_examples_per_sec = (
+                    effective_batch_size * throughput_log_interval / interval_elapsed
+                )
+
+                # Per-epoch and global training progress.
+                epoch_progress = (
+                    100.0 * epoch_batches_done / max(num_train_batches, 1)
+                )
+                global_batches_done = epoch * num_train_batches + epoch_batches_done
+                total_batches = num_epochs * max(num_train_batches, 1)
+                global_progress = 100.0 * global_batches_done / max(total_batches, 1)
+
+                remaining_batches = max(num_train_batches - epoch_batches_done, 0)
+                avg_batch_time = epoch_elapsed / max(epoch_batches_done, 1)
+                eta_seconds = remaining_batches * avg_batch_time
+
+                logging.info(
+                    f"[throughput] epoch {epoch} step {batch_id} "
+                    f"(epoch {epoch_progress:.1f}%, global {global_progress:.1f}%): "
+                    f"current {current_examples_per_sec:.2f} ex/s, "
+                    f"avg {avg_examples_per_sec:.2f} ex/s, "
+                    f"ETA {eta_seconds/60.0:.1f} min"
+                )
+                last_throughput_time = now
 
         def is_full_eval(epoch: int) -> bool:
             return (epoch % full_eval_every_n) == 0
@@ -437,6 +604,11 @@ def train_fn(
         eval_dict_all = None
         eval_start_time = time.time()
         model.eval()
+
+        # Track eval loss over this epoch.
+        eval_running_loss: float = 0.0
+        eval_running_batches: int = 0
+
         eval_state = get_eval_state(
             model=model.module,
             all_item_ids=dataset.all_item_ids,
@@ -454,6 +626,8 @@ def train_fn(
             seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
                 row, device=device, max_output_length=gr_output_length + 1
             )
+
+            # Ranking metrics on the current eval batch.
             eval_dict = eval_metrics_v2_from_tensors(
                 eval_state,
                 model.module,
@@ -463,6 +637,54 @@ def train_fn(
                 user_max_batch_size=eval_user_max_batch_size,
                 dtype=torch.bfloat16 if main_module_bf16 else None,
             )
+
+            # Eval loss on the same batch, using the autoregressive loss.
+            # This mirrors the training loss computation but without gradients.
+            with torch.no_grad():
+                # Insert target ids into the sequence at position `past_lengths`.
+                supervision_ids = seq_features.past_ids.clone()
+                supervision_ids.scatter_(
+                    dim=1,
+                    index=seq_features.past_lengths.view(-1, 1),
+                    src=target_ids.view(-1, 1),
+                )
+
+                eval_input_embeddings = model.module.get_item_embeddings(
+                    supervision_ids
+                )
+                eval_seq_embeddings = model(
+                    past_lengths=seq_features.past_lengths,
+                    past_ids=supervision_ids,
+                    past_embeddings=eval_input_embeddings,
+                    past_payloads=seq_features.past_payloads,
+                )
+
+                if uses_explicit_negatives:
+                    if sampling_strategy == "in-batch":
+                        in_batch_ids = supervision_ids.view(-1)
+                        negatives_sampler.process_batch(
+                            ids=in_batch_ids,
+                            presences=(in_batch_ids != 0),
+                            embeddings=model.module.get_item_embeddings(in_batch_ids),
+                        )
+                    else:
+                        # Local sampler: use the item embedding table.
+                        negatives_sampler._item_emb = (  # pyre-ignore[16]
+                            model.module._embedding_module._item_emb
+                        )
+
+                eval_ar_mask = supervision_ids[:, 1:] != 0
+                eval_loss_batch, _ = ar_loss(
+                    lengths=seq_features.past_lengths,
+                    output_embeddings=eval_seq_embeddings[:, :-1, :],
+                    supervision_ids=supervision_ids[:, 1:],
+                    supervision_embeddings=eval_input_embeddings[:, 1:, :],
+                    supervision_weights=eval_ar_mask.float(),
+                    negatives_sampler=negatives_sampler,
+                    **seq_features.past_payloads,
+                )
+                eval_running_loss += float(eval_loss_batch.detach().item())
+                eval_running_batches += 1
 
             if eval_dict_all is None:
                 eval_dict_all = {}
@@ -483,11 +705,39 @@ def train_fn(
         for k, v in eval_dict_all.items():
             eval_dict_all[k] = torch.cat(v, dim=-1)
 
+        ndcg_5 = _avg(eval_dict_all["ndcg@5"], world_size=world_size)
         ndcg_10 = _avg(eval_dict_all["ndcg@10"], world_size=world_size)
         ndcg_50 = _avg(eval_dict_all["ndcg@50"], world_size=world_size)
+        hr_5 = _avg(eval_dict_all["hr@5"], world_size=world_size)
         hr_10 = _avg(eval_dict_all["hr@10"], world_size=world_size)
         hr_50 = _avg(eval_dict_all["hr@50"], world_size=world_size)
         mrr = _avg(eval_dict_all["mrr"], world_size=world_size)
+
+        # Aggregate average training loss over the epoch across workers.
+        if running_batches > 0:
+            epoch_loss_tensor = torch.tensor(
+                [running_loss, running_batches],
+                dtype=torch.float32,
+                device=device,
+            )
+            if world_size > 1 and dist.is_initialized():
+                dist.all_reduce(epoch_loss_tensor, op=dist.ReduceOp.SUM)
+            avg_train_loss = epoch_loss_tensor[0] / epoch_loss_tensor[1]
+        else:
+            avg_train_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+
+        # Aggregate average eval loss over the epoch across workers.
+        if eval_running_batches > 0:
+            eval_loss_tensor = torch.tensor(
+                [eval_running_loss, eval_running_batches],
+                dtype=torch.float32,
+                device=device,
+            )
+            if world_size > 1 and dist.is_initialized():
+                dist.all_reduce(eval_loss_tensor, op=dist.ReduceOp.SUM)
+            avg_eval_loss = eval_loss_tensor[0] / eval_loss_tensor[1]
+        else:
+            avg_eval_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
 
         add_to_summary_writer(
             writer,
@@ -516,8 +766,20 @@ def train_fn(
 
         logging.info(
             f"rank {rank}: eval @ epoch {epoch} in {time.time() - eval_start_time:.2f}s: "
-            f"NDCG@10 {ndcg_10:.4f}, NDCG@50 {ndcg_50:.4f}, HR@10 {hr_10:.4f}, HR@50 {hr_50:.4f}, MRR {mrr:.4f}"
+            f"NDCG@5 {ndcg_5:.4f}, NDCG@10 {ndcg_10:.4f}, NDCG@50 {ndcg_50:.4f}, "
+            f"HR@5 {hr_5:.4f}, HR@10 {hr_10:.4f}, HR@50 {hr_50:.4f}, MRR {mrr:.4f}, "
+            f"train_loss {avg_train_loss.item():.4f}, eval_loss {avg_eval_loss.item():.4f}"
         )
+
+        # Total epoch wall-clock time (training + eval).
+        logging.info(
+            f"rank {rank}: epoch {epoch} total time "
+            f"{time.time() - epoch_start_time:.2f}s (train+eval)"
+        )
+
+        if rank == 0 and writer is not None:
+            writer.add_scalar("loss/train_epoch", avg_train_loss.item(), epoch)
+            writer.add_scalar("loss/eval_epoch", avg_eval_loss.item(), epoch)
         last_training_time = time.time()
 
     if rank == 0:
@@ -532,6 +794,130 @@ def train_fn(
                 "optimizer_state_dict": opt.state_dict(),
             },
             f"./ckpts/{model_desc}_ep{epoch}",
+        )
+
+    # Final test evaluation (if a dedicated test loader is available).
+    if test_data_loader is not None:
+        model.eval()
+        test_eval_dict_all = None
+        test_eval_start = time.time()
+
+        test_eval_state = get_eval_state(
+            model=model.module,
+            all_item_ids=dataset.all_item_ids,
+            negatives_sampler=negatives_sampler,
+            top_k_module_fn=lambda item_embeddings, item_ids: get_top_k_module(
+                top_k_method=top_k_method,
+                model=model.module,
+                item_embeddings=item_embeddings,
+                item_ids=item_ids,
+            ),
+            device=device,
+            float_dtype=torch.bfloat16 if main_module_bf16 else None,
+        )
+
+        test_running_loss: float = 0.0
+        test_running_batches: int = 0
+
+        for row in iter(test_data_loader):
+            seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
+                row, device=device, max_output_length=gr_output_length + 1
+            )
+
+            # Ranking metrics on the current test batch.
+            test_eval_dict = eval_metrics_v2_from_tensors(
+                test_eval_state,
+                model.module,
+                seq_features,
+                target_ids=target_ids,
+                target_ratings=target_ratings,
+                user_max_batch_size=eval_user_max_batch_size,
+                dtype=torch.bfloat16 if main_module_bf16 else None,
+            )
+
+            # Test loss using the same autoregressive loss.
+            with torch.no_grad():
+                supervision_ids = seq_features.past_ids.clone()
+                supervision_ids.scatter_(
+                    dim=1,
+                    index=seq_features.past_lengths.view(-1, 1),
+                    src=target_ids.view(-1, 1),
+                )
+
+                test_input_embeddings = model.module.get_item_embeddings(
+                    supervision_ids
+                )
+                test_seq_embeddings = model(
+                    past_lengths=seq_features.past_lengths,
+                    past_ids=supervision_ids,
+                    past_embeddings=test_input_embeddings,
+                    past_payloads=seq_features.past_payloads,
+                )
+
+                if uses_explicit_negatives:
+                    if sampling_strategy == "in-batch":
+                        in_batch_ids = supervision_ids.view(-1)
+                        negatives_sampler.process_batch(
+                            ids=in_batch_ids,
+                            presences=(in_batch_ids != 0),
+                            embeddings=model.module.get_item_embeddings(in_batch_ids),
+                        )
+                    else:
+                        negatives_sampler._item_emb = (  # pyre-ignore[16]
+                            model.module._embedding_module._item_emb
+                        )
+
+                test_ar_mask = supervision_ids[:, 1:] != 0
+                test_loss_batch, _ = ar_loss(
+                    lengths=seq_features.past_lengths,
+                    output_embeddings=test_seq_embeddings[:, :-1, :],
+                    supervision_ids=supervision_ids[:, 1:],
+                    supervision_embeddings=test_input_embeddings[:, 1:, :],
+                    supervision_weights=test_ar_mask.float(),
+                    negatives_sampler=negatives_sampler,
+                    **seq_features.past_payloads,
+                )
+                test_running_loss += float(test_loss_batch.detach().item())
+                test_running_batches += 1
+
+            if test_eval_dict_all is None:
+                test_eval_dict_all = {}
+                for k, v in test_eval_dict.items():
+                    test_eval_dict_all[k] = []
+
+            for k, v in test_eval_dict.items():
+                test_eval_dict_all[k] = test_eval_dict_all[k] + [v]
+            del test_eval_dict
+
+        assert test_eval_dict_all is not None
+        for k, v in test_eval_dict_all.items():
+            test_eval_dict_all[k] = torch.cat(v, dim=-1)
+
+        test_ndcg_5 = _avg(test_eval_dict_all["ndcg@5"], world_size=world_size)
+        test_ndcg_10 = _avg(test_eval_dict_all["ndcg@10"], world_size=world_size)
+        test_ndcg_50 = _avg(test_eval_dict_all["ndcg@50"], world_size=world_size)
+        test_hr_5 = _avg(test_eval_dict_all["hr@5"], world_size=world_size)
+        test_hr_10 = _avg(test_eval_dict_all["hr@10"], world_size=world_size)
+        test_hr_50 = _avg(test_eval_dict_all["hr@50"], world_size=world_size)
+        test_mrr = _avg(test_eval_dict_all["mrr"], world_size=world_size)
+
+        if test_running_batches > 0:
+            test_loss_tensor = torch.tensor(
+                [test_running_loss, test_running_batches],
+                dtype=torch.float32,
+                device=device,
+            )
+            if world_size > 1 and dist.is_initialized():
+                dist.all_reduce(test_loss_tensor, op=dist.ReduceOp.SUM)
+            avg_test_loss = test_loss_tensor[0] / test_loss_tensor[1]
+        else:
+            avg_test_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+
+        logging.info(
+            f"rank {rank}: TEST eval in {time.time() - test_eval_start:.2f}s: "
+            f"NDCG@5 {test_ndcg_5:.4f}, NDCG@10 {test_ndcg_10:.4f}, NDCG@50 {test_ndcg_50:.4f}, "
+            f"HR@5 {test_hr_5:.4f}, HR@10 {test_hr_10:.4f}, HR@50 {test_hr_50:.4f}, "
+            f"MRR {test_mrr:.4f}, eval_loss {avg_test_loss.item():.4f}"
         )
 
     cleanup()

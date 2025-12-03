@@ -17,6 +17,7 @@
 from dataclasses import dataclass
 from typing import List
 
+import ast
 import pandas as pd
 
 import torch
@@ -104,6 +105,22 @@ def get_reco_dataset(
             shift_id_by=1,  # [0..n-1] -> [1..n]
             chronological=chronological,
         )
+    elif dataset_name == "merlin":
+        dp = get_common_preprocessors()[dataset_name]
+        train_dataset = DatasetV2(
+            ratings_file=dp.sasrec_format_csv_train(),
+            padding_length=max_sequence_length + 1,  # target
+            ignore_last_n=0,
+            shift_id_by=1,  # [0..n-1] -> [1..n]
+            chronological=chronological,
+        )
+        eval_dataset = DatasetV2(
+            ratings_file=dp.sasrec_format_csv_valid(),
+            padding_length=max_sequence_length + 1,  # target
+            ignore_last_n=0,
+            shift_id_by=1,  # [0..n-1] -> [1..n]
+            chronological=chronological,
+        )
     else:
         raise ValueError(f"Unknown dataset {dataset_name}")
 
@@ -162,17 +179,52 @@ def get_reco_dataset(
         max_item_id = dp.expected_max_item_id()
         for x in all_item_ids:
             assert x > 0, "x in all_item_ids should be positive"
+    elif dataset_name == "merlin":
+        # Merlin data has no separate item-features file. Infer the maximum
+        # item id directly from the processed SASRec-format CSV written by
+        # MerlinParquetDataProcessor.preprocess_rating().
+        item_features = None
+
+        train_csv = dp.sasrec_format_csv_train()
+        df = pd.read_csv(train_csv, delimiter=",")
+
+        def _max_from_seq_column(col: pd.Series) -> int:
+            max_val = 0
+            for s in col:
+                seq = ast.literal_eval(s)
+                if isinstance(seq, int):
+                    max_val = max(max_val, int(seq))
+                else:
+                    if len(seq) > 0:
+                        max_val = max(max_val, int(max(seq)))
+            return max_val
+
+        max_raw_id = _max_from_seq_column(df["sequence_item_ids"])
+        # CSV uses 0..N-1; DatasetV2 shifts by +1, so max_item_id is N.
+        max_item_id = max_raw_id + 1
+        num_unique_items = max_item_id
+        all_item_ids = [x + 1 for x in range(max_raw_id + 1)]
+
+        return RecoDataset(
+            max_sequence_length=max_sequence_length,
+            num_unique_items=num_unique_items,
+            max_item_id=max_item_id,
+            all_item_ids=all_item_ids,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+        )
     else:
-        # expected_max_item_id and item_features are not set for Amazon datasets.
+        # expected_max_item_id and item_features are not set for Amazon and
+        # synthetic datasets. Use the expected number of unique items.
         item_features = None
         max_item_id = dp.expected_num_unique_items()
         all_item_ids = [x + 1 for x in range(max_item_id)]  # pyre-ignore [6]
 
-    return RecoDataset(
-        max_sequence_length=max_sequence_length,
-        num_unique_items=dp.expected_num_unique_items(),  # pyre-ignore [6]
-        max_item_id=max_item_id,  # pyre-ignore [6]
-        all_item_ids=all_item_ids,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-    )
+        return RecoDataset(
+            max_sequence_length=max_sequence_length,
+            num_unique_items=max_item_id,  # pyre-ignore [6]
+            max_item_id=max_item_id,  # pyre-ignore [6]
+            all_item_ids=all_item_ids,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+        )

@@ -14,6 +14,8 @@
 
 # pyre-unsafe
 
+import logging
+
 import gin
 from generative_recommenders.research.modeling.sequential.embedding_modules import (
     EmbeddingModule,
@@ -123,6 +125,18 @@ def get_sequential_encoder(
     verbose: bool,
     activation_checkpoint: bool = False,
 ) -> SequentialEncoderWithLearnedSimilarityModule:
+    if verbose:
+        # Print the effective gin configuration being used for this run.
+        try:
+            from gin import config as gin_config
+
+            logging.info(
+                "Operative gin configuration:\n%s",
+                gin_config.operative_config_str(),
+            )
+        except Exception:
+            logging.warning("Failed to print operative gin configuration.")
+
     if module_type == "SASRec":
         model = sasrec_encoder(
             max_sequence_length=max_sequence_length,
@@ -147,4 +161,23 @@ def get_sequential_encoder(
         )
     else:
         raise ValueError(f"Unsupported module_type {module_type}")
+
+    if verbose:
+        logging.info("Sequential encoder architecture:\n%s", model)
+
+        # Aggregate parameter count (kept for easy consistency checks).
+        num_params = sum(p.numel() for p in model.parameters())
+        logging.info("Sequential encoder parameter count: %d", num_params)
+
+        # Detailed per-parameter breakdown.
+        total_params = 0
+        logging.info("Sequential encoder parameter breakdown (per tensor):")
+        for name, param in model.named_parameters():
+            numel = param.numel()
+            total_params += numel
+            logging.info(
+                "  %s: shape=%s, params=%d", name, tuple(param.shape), numel
+            )
+        logging.info("Sequential encoder total parameter count: %d", total_params)
+
     return model
