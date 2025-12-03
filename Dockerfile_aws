@@ -57,13 +57,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy project files
 COPY . /workspace
 
-# Create common output locations for training runs
+# Create common output locations for training runs. The AWS runner script
+# mounts host directories onto these paths so logs/checkpoints/experiments
+# and Merlin parquet data persist outside the container.
 RUN mkdir -p /workspace/logs /workspace/ckpts /workspace/exps /workspace/tmp/merlin
-
-# Copy preprocessed Merlin parquet files (if present in the build context)
-COPY tmp/merlin/train.parquet /workspace/tmp/merlin/train.parquet
-COPY tmp/merlin/valid.parquet /workspace/tmp/merlin/valid.parquet
-COPY tmp/merlin/test.parquet /workspace/tmp/merlin/test.parquet
 
 WORKDIR /workspace
 
