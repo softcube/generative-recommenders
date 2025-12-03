@@ -1,0 +1,60 @@
+# Lightweight HSTU config for a very small
+# multi-epoch training run on ML-1M using
+# full softmax loss over the entire catalog.
+# Suitable for quick CPU/MPS sanity checks.
+#
+# Run as:
+#   python3 main.py \
+#     --gin_config_file=configs/ml-1m/hstu-full-softmax-mini-train.gin \
+#     --master_port=12345
+
+train_fn.dataset_name = "ml-1m"
+train_fn.max_sequence_length = 100
+train_fn.local_batch_size = 64
+
+train_fn.main_module = "HSTU"
+train_fn.dropout_rate = 0.2
+train_fn.user_embedding_norm = "l2_norm"
+
+# Small multi-epoch run.
+train_fn.num_epochs = 10
+
+train_fn.item_embedding_dim = 32
+
+hstu_encoder.num_blocks = 1
+hstu_encoder.num_heads = 1
+hstu_encoder.dqk = 32
+hstu_encoder.dv = 32
+hstu_encoder.linear_dropout_rate = 0.2
+
+train_fn.learning_rate = 1e-3
+train_fn.weight_decay = 0
+train_fn.num_warmup_steps = 0
+
+train_fn.interaction_module_type = "DotProduct"
+train_fn.top_k_method = "MIPSBruteForceTopK"
+
+# Use full softmax over all items (no explicit negatives).
+train_fn.loss_module = "FullSoftmaxLoss"
+train_fn.temperature = 1.0
+train_fn.main_module_bf16 = True
+get_similarity_function.bf16_training = True
+
+train_fn.sampling_strategy = "local"
+train_fn.item_l2_norm = True
+train_fn.l2_norm_eps = 1e-6
+
+
+# Make eval very cheap.
+train_fn.eval_interval = 1000000000  # larger than total #batches per epoch
+train_fn.full_eval_every_n = 1       # eval after each epoch
+train_fn.partial_eval_num_iters = 1
+train_fn.save_ckpt_every_n = 1       # save every epoch
+train_fn.throughput_log_interval = 100
+
+train_fn.enable_tf32 = True
+
+# Single-process, no worker subprocesses for macOS.
+create_data_loader.prefetch_factor = None
+create_data_loader.num_workers = 0
+

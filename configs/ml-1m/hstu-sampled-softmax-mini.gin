@@ -1,0 +1,52 @@
+# Lightweight HSTU config for quick smoke tests on ML-1M.
+# Intended for CPU/MPS (e.g., macOS) to verify that the
+# training/eval pipeline runs end-to-end without long runtimes.
+#
+# Run as:
+#   python3 main.py \
+#     --gin_config_file=configs/ml-1m/hstu-sampled-softmax-mini.gin \
+#     --master_port=12345
+
+train_fn.dataset_name = "ml-1m"
+train_fn.max_sequence_length = 200
+train_fn.local_batch_size = 128
+
+train_fn.main_module = "HSTU"
+train_fn.dropout_rate = 0.2
+train_fn.user_embedding_norm = "l2_norm"
+
+# Zero epochs: run all initialization and data pipeline,
+# but skip the expensive training/eval loops. This makes
+# it very fast to test that the script and environment
+# are correctly set up.
+train_fn.num_epochs = 0
+
+train_fn.item_embedding_dim = 50
+
+hstu_encoder.num_blocks = 2
+hstu_encoder.num_heads = 1
+hstu_encoder.dqk = 50
+hstu_encoder.dv = 50
+hstu_encoder.linear_dropout_rate = 0.2
+
+train_fn.learning_rate = 1e-3
+train_fn.weight_decay = 0
+train_fn.num_warmup_steps = 0
+
+train_fn.interaction_module_type = "DotProduct"
+train_fn.top_k_method = "MIPSBruteForceTopK"
+
+train_fn.loss_module = "SampledSoftmaxLoss"
+train_fn.num_negatives = 128
+
+train_fn.sampling_strategy = "local"
+train_fn.temperature = 0.05
+train_fn.item_l2_norm = True
+train_fn.l2_norm_eps = 1e-6
+
+train_fn.enable_tf32 = True
+
+# Single-process, no worker subprocesses: avoids shared-memory
+# errors on macOS and keeps the run lightweight.
+create_data_loader.prefetch_factor = None
+create_data_loader.num_workers = 0
