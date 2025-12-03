@@ -18,6 +18,7 @@ import logging
 import os
 import random
 
+import sys
 import time
 
 from datetime import date
@@ -163,6 +164,17 @@ def train_fn(
     enable_tf32: bool = False,
     random_seed: int = 42,
 ) -> None:
+    # Ensure INFO-level logs are visible when running in worker processes
+    # (e.g., under torch.multiprocessing.spawn on GPU servers).
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(logging.INFO)
+        formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
     # to enable more deterministic results.
     random.seed(random_seed)
     torch.backends.cuda.matmul.allow_tf32 = enable_tf32
