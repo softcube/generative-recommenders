@@ -49,8 +49,8 @@ WORKDIR /workspace
 # Copy dependency file first for better Docker layer caching
 COPY requirements_aws_merlin.txt ./requirements_aws_merlin.txt
 
-# Install Python dependencies for Merlin experiments (no torchrec/fbgemm_gpu to
-# avoid CUDA/toolchain mismatches inside this minimal AWS image).
+# Install Python dependencies for Merlin experiments, including fbgemm_gpu on
+# Linux so that optimized jagged/sparse CUDA kernels are available.
 RUN pip install --upgrade pip && \
     pip install -r requirements_aws_merlin.txt
 
