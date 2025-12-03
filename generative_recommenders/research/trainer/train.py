@@ -163,6 +163,7 @@ def train_fn(
     l2_norm_eps: float = 1e-6,
     enable_tf32: bool = False,
     random_seed: int = 42,
+    use_torch_compile: bool = False,
 ) -> None:
     # Ensure INFO-level logs are visible when running in worker processes
     # (e.g., under torch.multiprocessing.spawn on GPU servers).
@@ -423,6 +424,10 @@ def train_fn(
         model = model.to(torch.bfloat16)
 
     model = model.to(device)
+
+    if use_torch_compile and torch.cuda.is_available():
+        logging.info(f"Rank {rank}: compiling model with torch.compile()")
+        model = torch.compile(model)  # type: ignore[attr-defined]
     ar_loss = ar_loss.to(device)
     negatives_sampler = negatives_sampler.to(device)
     if world_size > 1:
