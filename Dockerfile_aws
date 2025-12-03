@@ -47,12 +47,12 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /workspace
 
 # Copy dependency file first for better Docker layer caching
-COPY requirements.txt ./requirements.txt
+COPY requirements_aws_merlin.txt ./requirements_aws_merlin.txt
 
-# Install Python dependencies (including torch / torchrec / fbgemm_gpu)
-# Note: keep this compatible with Docker setups that do NOT use BuildKit.
+# Install Python dependencies for Merlin experiments (no torchrec/fbgemm_gpu to
+# avoid CUDA/toolchain mismatches inside this minimal AWS image).
 RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+    pip install -r requirements_aws_merlin.txt
 
 # Copy project files
 COPY . /workspace
