@@ -1,17 +1,17 @@
-# HSTU config approximating your small GPT-style transformer
+# SASRec config approximating your small GPT-style transformer
 # on Merlin session data in tmp/merlin, using full softmax loss
-# and event-type features as extra inputs.
+# and MoL (Mixture-of-Logits) similarity instead of plain dot product.
 #
 # This lets you compare:
-#   - HSTU vs SASRec (Transformer) at similar scale
-#   - Both with FullSoftmaxLoss and rated inputs on the same data.
+#   - SASRec + DotProduct (sasrec-gpt-like-full-softmax-mini.gin)
+#   - vs SASRec + MoL similarity at similar scale.
 #
 # Preprocessing (no prefix expansion; expand_sequences_to_prefixes=False):
 #   python3 preprocess_merlin_data.py
 #
 # Run training as:
 #   python3 main.py \
-#     --gin_config_file=configs/merlin/hstu-gpt-like-full-softmax-mini.gin \
+#     --gin_config_file=configs/merlin/sasrec-gpt-like-full-softmax-mol-mini.gin \
 #     --master_port=12345
 
 train_fn.dataset_name = "merlin"
@@ -26,8 +26,8 @@ train_fn.gr_output_length = 0
 train_fn.local_batch_size = 512
 train_fn.eval_batch_size = 128
 
-# Use HSTU as the main module.
-train_fn.main_module = "HSTU"
+# Use SASRec (Transformer) as the main module to mimic GPT.
+train_fn.main_module = "SASRec"
 
 # Match low dropout from your GPT (0.01).
 train_fn.dropout_rate = 0.01
@@ -36,6 +36,7 @@ train_fn.user_embedding_norm = "l2_norm"
 # Use rated input preprocessor: concatenate item embeddings
 # with event-type embeddings derived from ratings.
 train_fn.use_rated_input_preproc = True
+# Match your old event embedding dim (8) and vocab size (6).
 train_fn.rating_embedding_dim = 8
 train_fn.num_ratings = 6
 
@@ -45,32 +46,46 @@ train_fn.num_epochs = 10
 # Match GPT hidden size (model dim) of 512.
 train_fn.item_embedding_dim = 512
 
-# HSTU depth and heads close to your GPT:
+# Transformer depth and heads close to your GPT:
 # 4 layers, 2 attention heads.
-hstu_encoder.num_blocks = 4
-hstu_encoder.num_heads = 2
+sasrec_encoder.num_blocks = 4
+sasrec_encoder.num_heads = 2
 
-# Attention and linear dimensions similar to GPT:
-hstu_encoder.dqk = 1024   # attention_dim
-hstu_encoder.dv = 3072    # linear_dim
+# FFN hidden dim ~ 3x model dim (your GPT used 1024->3072).
+sasrec_encoder.ffn_hidden_dim = 3072
+sasrec_encoder.ffn_activation_fn = "gelu"
 
-# Use small dropout in attention/linear layers.
-hstu_encoder.linear_dropout_rate = 0.01
-hstu_encoder.attn_dropout_rate = 0.01
+# Use small dropout in attention/FFN to match GPT (0.01).
+sasrec_encoder.ffn_dropout_rate = 0.01
 
 train_fn.learning_rate = 1e-3
 train_fn.weight_decay = 0
 train_fn.num_warmup_steps = 0
 
-# Dot-product similarity + brute-force top-K, analogous to GPT logits.
-train_fn.interaction_module_type = "DotProduct"
-train_fn.top_k_method = "MIPSBruteForceTopK"
+# MoL similarity + MoL-aware brute-force Top-K.
+train_fn.interaction_module_type = "MoL"
+train_fn.top_k_method = "MoLBruteForceTopK"
 
-# Use full softmax over all items.
+# Use full softmax over all items (closest to GPT LM CE).
 train_fn.loss_module = "FullSoftmaxLoss"
 train_fn.temperature = 1.0
 train_fn.main_module_bf16 = True
 get_similarity_function.bf16_training = True
+
+# MoL hyperparameters (see create_mol_interaction_module in similarity_utils.py).
+# These control the number/size of component logits and gating MLPs.
+create_mol_interaction_module.dot_product_dimension = 128
+create_mol_interaction_module.query_dot_product_groups = 4
+create_mol_interaction_module.item_dot_product_groups = 4
+create_mol_interaction_module.temperature = 1.0
+create_mol_interaction_module.query_dropout_rate = 0.01
+create_mol_interaction_module.query_hidden_dim = 1024
+create_mol_interaction_module.item_dropout_rate = 0.01
+create_mol_interaction_module.item_hidden_dim = 1024
+create_mol_interaction_module.gating_query_hidden_dim = 512
+create_mol_interaction_module.gating_qi_hidden_dim = 512
+create_mol_interaction_module.gating_item_hidden_dim = 512
+create_mol_interaction_module.softmax_dropout_rate = 0.0
 
 # Sampling strategy is ignored by FullSoftmaxLoss but kept for completeness.
 train_fn.sampling_strategy = "local"
@@ -89,3 +104,4 @@ train_fn.enable_tf32 = True
 # Single-process, no worker subprocesses for macOS.
 create_data_loader.prefetch_factor = None
 create_data_loader.num_workers = 0
+

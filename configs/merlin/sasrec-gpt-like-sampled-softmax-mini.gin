@@ -42,8 +42,8 @@ train_fn.num_ratings = 6
 # Small multi-epoch run.
 train_fn.num_epochs = 10
 
-# Match GPT hidden size (model dim) of 1024.
-train_fn.item_embedding_dim = 1024
+# Match GPT hidden size (model dim) of 512.
+train_fn.item_embedding_dim = 512
 
 # Transformer depth and heads close to your GPT:
 # 4 layers, 2 attention heads.
@@ -69,6 +69,8 @@ train_fn.top_k_method = "MIPSBruteForceTopK"
 train_fn.loss_module = "SampledSoftmaxLoss"
 train_fn.num_negatives = 16
 train_fn.temperature = 1.0
+train_fn.main_module_bf16 = True
+get_similarity_function.bf16_training = True
 
 train_fn.sampling_strategy = "local"
 train_fn.item_l2_norm = True

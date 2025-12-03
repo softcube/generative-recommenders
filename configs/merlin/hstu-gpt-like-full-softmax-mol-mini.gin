@@ -1,17 +1,18 @@
 # HSTU config approximating your small GPT-style transformer
-# on Merlin session data in tmp/merlin, using sampled softmax loss
-# and event-type features as extra inputs.
+# on Merlin session data in tmp/merlin, using full softmax loss
+# and MoL (Mixture-of-Logits) similarity instead of plain dot product,
+# with event-type features as extra inputs.
 #
 # This lets you compare:
-#   - FullSoftmaxLoss vs SampledSoftmaxLoss for HSTU
-#   - while keeping architecture and rated inputs the same.
+#   - HSTU + DotProduct (hstu-gpt-like-full-softmax-mini.gin)
+#   - vs HSTU + MoL similarity at similar scale.
 #
 # Preprocessing (no prefix expansion; expand_sequences_to_prefixes=False):
 #   python3 preprocess_merlin_data.py
 #
 # Run training as:
 #   python3 main.py \
-#     --gin_config_file=configs/merlin/hstu-gpt-like-sampled-softmax-mini.gin \
+#     --gin_config_file=configs/merlin/hstu-gpt-like-full-softmax-mol-mini.gin \
 #     --master_port=12345
 
 train_fn.dataset_name = "merlin"
@@ -62,17 +63,32 @@ train_fn.learning_rate = 1e-3
 train_fn.weight_decay = 0
 train_fn.num_warmup_steps = 0
 
-# Dot-product similarity + brute-force top-K, analogous to GPT logits.
-train_fn.interaction_module_type = "DotProduct"
-train_fn.top_k_method = "MIPSBruteForceTopK"
+# MoL similarity + MoL-aware brute-force Top-K.
+train_fn.interaction_module_type = "MoL"
+train_fn.top_k_method = "MoLBruteForceTopK"
 
-# Sampled softmax loss: approximate full softmax with sampled negatives.
-train_fn.loss_module = "SampledSoftmaxLoss"
-train_fn.num_negatives = 16
+# Use full softmax over all items.
+train_fn.loss_module = "FullSoftmaxLoss"
 train_fn.temperature = 1.0
 train_fn.main_module_bf16 = True
 get_similarity_function.bf16_training = True
 
+# MoL hyperparameters shared with the SASRec MoL config so you can
+# isolate the effect of the main module vs similarity function.
+create_mol_interaction_module.dot_product_dimension = 128
+create_mol_interaction_module.query_dot_product_groups = 4
+create_mol_interaction_module.item_dot_product_groups = 4
+create_mol_interaction_module.temperature = 1.0
+create_mol_interaction_module.query_dropout_rate = 0.01
+create_mol_interaction_module.query_hidden_dim = 1024
+create_mol_interaction_module.item_dropout_rate = 0.01
+create_mol_interaction_module.item_hidden_dim = 1024
+create_mol_interaction_module.gating_query_hidden_dim = 512
+create_mol_interaction_module.gating_qi_hidden_dim = 512
+create_mol_interaction_module.gating_item_hidden_dim = 512
+create_mol_interaction_module.softmax_dropout_rate = 0.0
+
+# Sampling strategy is ignored by FullSoftmaxLoss but kept for completeness.
 train_fn.sampling_strategy = "local"
 train_fn.item_l2_norm = True
 train_fn.l2_norm_eps = 1e-6
@@ -89,3 +105,4 @@ train_fn.enable_tf32 = True
 # Single-process, no worker subprocesses for macOS.
 create_data_loader.prefetch_factor = None
 create_data_loader.num_workers = 0
+

@@ -58,25 +58,27 @@ def run_config(config: ConfigResult) -> ConfigResult:
     print("Command:", " ".join(cmd))
 
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            check=False,
+            bufsize=1,
         )
     except Exception as e:
         config.failed = True
-        config.error = f"Exception while running: {e}"
+        config.error = f"Exception while starting: {e}"
         print(config.error)
         return config
 
-    output = proc.stdout
-    # Echo the last few lines for context.
-    tail_lines = "\n".join(output.strip().splitlines()[-10:])
-    print("\n--- Output tail ---")
-    print(tail_lines)
-    print("-------------------\n")
+    assert proc.stdout is not None
+    lines: List[str] = []
+    for line in proc.stdout:
+        print(line, end="")
+        lines.append(line)
+    proc.wait()
+
+    output = "".join(lines)
 
     if proc.returncode != 0:
         config.failed = True
@@ -182,10 +184,12 @@ def main() -> None:
         "sasrec_full_softmax_rated": "configs/merlin/sasrec-gpt-like-full-softmax-mini.gin",
         "sasrec_full_softmax_no_ratings": "configs/merlin/sasrec-gpt-like-full-softmax-no-ratings-mini.gin",
         "sasrec_sampled_softmax_rated": "configs/merlin/sasrec-gpt-like-sampled-softmax-mini.gin",
+        "sasrec_full_softmax_rated_mol": "configs/merlin/sasrec-gpt-like-full-softmax-mol-mini.gin",
         # HSTU variants
         "hstu_full_softmax_rated": "configs/merlin/hstu-gpt-like-full-softmax-mini.gin",
         "hstu_full_softmax_no_ratings": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini.gin",
         "hstu_sampled_softmax_rated": "configs/merlin/hstu-gpt-like-sampled-softmax-mini.gin",
+        "hstu_full_softmax_rated_mol": "configs/merlin/hstu-gpt-like-full-softmax-mol-mini.gin",
     }
 
     results: List[ConfigResult] = []
