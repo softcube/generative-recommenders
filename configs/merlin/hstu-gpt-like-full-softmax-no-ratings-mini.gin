@@ -40,17 +40,16 @@ train_fn.use_rated_input_preproc = False
 # Single-epoch run for quick experiments.
 train_fn.num_epochs = 1
 
-# Match GPT hidden size (model dim) of 512.
-train_fn.item_embedding_dim = 512
+# Match GPT-style capacity with smaller trainable embeddings.
+train_fn.item_embedding_dim = 256
 
-# HSTU depth and heads close to your GPT:
-# 4 layers, 2 attention heads.
+# HSTU depth and heads.
 hstu_encoder.num_blocks = 4
 hstu_encoder.num_heads = 2
 
-# Attention and linear dimensions similar to GPT:
-hstu_encoder.dqk = 1024   # attention_dim
-hstu_encoder.dv = 3072    # linear_dim
+# Attention and linear dimensions chosen to approximate GPT block capacity.
+hstu_encoder.dqk = 256   # attention_dim per head (total 512)
+hstu_encoder.dv = 768    # linear_dim per head (total 1536)
 
 # Use small dropout in attention/linear layers.
 hstu_encoder.linear_dropout_rate = 0.01
