@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1.4
+
+ARG UBUNTU_VERSION=22.04
+ARG CUDA_VERSION=12.0.0
+ARG CUDA_BUILD_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn8-devel-ubuntu${UBUNTU_VERSION}
+
+FROM ${CUDA_BUILD_IMAGE}
+
+LABEL builder="generative_recommenders_training"
+
+# Base environment
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_CACHE_DIR=/pip-cache \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    CUDA_LAUNCH_BLOCKING=1 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Optional flag in case you later want to extend with
+# multi-GPU-specific system dependencies (kept for style parity).
+ARG WITH_MULTI_GPU=false
+
+# Install system dependencies and Python
+RUN apt-get update && apt-get install -y \
+    software-properties-common \
+    curl \
+    python3.10 \
+    python3.10-dev \
+    python3.10-distutils \
+    python3.10-venv \
+    python3-pip \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libffi-dev \
+    git \
+    vim \
+    && ln -sf /usr/bin/python3.10 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.10 \
+    && ln -sf /usr/bin/pip3 /usr/bin/pip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Copy dependency file first for better Docker layer caching
+COPY requirements.txt ./requirements.txt
+
+# Install Python dependencies (including torch / torchrec / fbgemm_gpu)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# Copy project files
+COPY . /workspace
+
+# Create common output locations for training runs
+RUN mkdir -p /workspace/logs /workspace/ckpts /workspace/exps /workspace/tmp/merlin
+
+# Copy preprocessed Merlin parquet files (if present in the build context)
+COPY tmp/merlin/train.parquet /workspace/tmp/merlin/train.parquet
+COPY tmp/merlin/valid.parquet /workspace/tmp/merlin/valid.parquet
+COPY tmp/merlin/test.parquet /workspace/tmp/merlin/test.parquet
+
+WORKDIR /workspace
+
+# Match the style of the reference Dockerfile: keep the container
+# alive and let the user exec in and run whatever they want.
+ENTRYPOINT ["tail", "-f", "/dev/null"]
