@@ -177,6 +177,15 @@ def print_summary(results: List[ConfigResult]) -> None:
     else:
         print("\nNo successful runs to select a best config from.")
 
+    # Print any recorded errors for easier debugging.
+    any_errors = False
+    for r in results:
+        if r.failed and r.error:
+            if not any_errors:
+                print("\nErrors:")
+                any_errors = True
+            print(f"- {r.name}: {r.error}")
+
 
 def main() -> None:
     root = Path(__file__).resolve().parent
