@@ -20,9 +20,23 @@ IMAGE_NAME="${IMAGE_NAME:-generative-recommenders-merlin}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 CONTAINER_NAME="${CONTAINER_NAME:-generative-recommenders-merlin}"
 
+# If USE_CPU_ONLY=1 is set in the environment, do not request GPUs
+# and hide CUDA devices inside the container so training runs on CPU.
+USE_CPU_ONLY="${USE_CPU_ONLY:-0}"
+
 # GPU_OPTION is expected to be passed in from the environment.
-# Fall back to a reasonable default if not provided.
-GPU_OPTION="${GPU_OPTION:---gpus all}"
+# Fall back to a reasonable default if not provided, unless CPU-only.
+if [ "${USE_CPU_ONLY}" = "1" ]; then
+  GPU_OPTION=""
+else
+  GPU_OPTION="${GPU_OPTION:---gpus all}"
+fi
+
+EXTRA_ENV_ARGS=()
+if [ "${USE_CPU_ONLY}" = "1" ]; then
+  # Hide GPUs from PyTorch so torch.cuda.is_available() is False.
+  EXTRA_ENV_ARGS+=("-e" "CUDA_VISIBLE_DEVICES=")
+fi
 
 # Host directories to persist artifacts and data. Defaults assume the script
 # is run from the repo root on the host.
@@ -56,6 +70,7 @@ docker run -d \
   --name "${CONTAINER_NAME}" \
   --restart always \
   ${GPU_OPTION} \
+  "${EXTRA_ENV_ARGS[@]}" \
   -v "${HOST_LOGS_DIR}:/workspace/logs" \
   -v "${HOST_CKPTS_DIR}:/workspace/ckpts" \
   -v "${HOST_EXPS_DIR}:/workspace/exps" \
