@@ -35,7 +35,16 @@ def get_top_k_module(
             item_ids=item_ids,
         )
     elif top_k_method == "MoLBruteForceTopK":
+        # For MoL, we need the underlying MoLSimilarity module. Sequential
+        # encoders expose this as `_ndp_module` (see SequentialEncoderWithLearnedSimilarityModule).
+        mol_module = getattr(model, "_ndp_module", None)
+        if mol_module is None:
+            raise ValueError(
+                "MoLBruteForceTopK requires the model to expose a "
+                "`_ndp_module` MoLSimilarity instance."
+            )
         top_k_module = MoLBruteForceTopK(  # pyre-ignore [20]
+            mol_module=mol_module,
             item_embeddings=item_embeddings,
             item_ids=item_ids,
         )
