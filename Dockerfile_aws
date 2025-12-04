@@ -1,13 +1,22 @@
 # syntax=docker/dockerfile:1.4
 
 ARG UBUNTU_VERSION=22.04
+
+# Previous base image (kept for reference):
 # CUDA 12.0 image tag is known to exist in the
 # nvidia/cuda repository and works with this project.
 # The README mentions testing with CUDA 12.4, but the
 # generic 12.4.0-cudnn8-devel-ubuntu22.04 tag is not
 # published, so we keep using 12.0.0 here.
+# ARG CUDA_VERSION=12.0.0
+# ARG CUDA_BUILD_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn8-devel-ubuntu${UBUNTU_VERSION}
+# FROM ${CUDA_BUILD_IMAGE}
+
+# New base image (functionally the same, but separated so you can
+# easily switch or experiment with different CUDA tags if desired).
 ARG CUDA_VERSION=12.0.0
-ARG CUDA_BUILD_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn8-devel-ubuntu${UBUNTU_VERSION}
+#ARG CUDA_BUILD_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn8-devel-ubuntu${UBUNTU_VERSION}
+ARG CUDA_BUILD_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 
 FROM ${CUDA_BUILD_IMAGE}
 
