@@ -17,6 +17,7 @@ This script assumes:
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -34,6 +35,7 @@ class ConfigResult:
     hr50: Optional[float] = None
     mrr: Optional[float] = None
     eval_loss: Optional[float] = None
+    elapsed_sec: Optional[float] = None
     failed: bool = False
     error: Optional[str] = None
 
@@ -57,6 +59,7 @@ def run_config(config: ConfigResult) -> ConfigResult:
     print(f"\n=== Running config: {config.name} ===")
     print("Command:", " ".join(cmd))
 
+    start_time = time.time()
     try:
         proc = subprocess.Popen(
             cmd,
@@ -77,6 +80,7 @@ def run_config(config: ConfigResult) -> ConfigResult:
         print(line, end="")
         lines.append(line)
     proc.wait()
+    config.elapsed_sec = time.time() - start_time
 
     output = "".join(lines)
 
@@ -114,22 +118,27 @@ def format_float(x: Optional[float]) -> str:
     return f"{x:.4f}" if x is not None else "NA"
 
 
+def format_time_minutes(x: Optional[float]) -> str:
+    if x is None:
+        return "NA"
+    return f"{x / 60.0:.1f}"
+
+
 def print_summary(results: List[ConfigResult]) -> None:
     print("\n=== Merlin config comparison (TEST metrics) ===")
     headers = [
         "Config",
-        "NDCG@5",
-        "NDCG@10",
-        "NDCG@50",
         "HR@5",
         "HR@10",
-        "HR@50",
+        "NDCG@5",
+        "NDCG@10",
         "MRR",
+        "Time (min)",
         "Eval loss",
         "Status",
     ]
     # Ensure the first column is wide enough for long config names.
-    col_widths = [max(len(headers[0]), 22), 8, 8, 8, 8, 8, 8, 10, 8]
+    col_widths = [max(len(headers[0]), 22), 8, 8, 8, 8, 10, 10, 10, 8]
 
     def fmt_row(cols: List[str]) -> str:
         return (
@@ -141,28 +150,37 @@ def print_summary(results: List[ConfigResult]) -> None:
     print(fmt_row(headers))
     print("-" * (sum(col_widths) + 2 * (len(col_widths) - 1)))
 
-    # Choose best config by highest NDCG@10 (only among non-failed).
+    # Choose best config by highest HR@5 (only among non-failed).
     best_idx: Optional[int] = None
-    best_ndcg10: float = -1.0
+    best_hr5: float = -1.0
     for i, r in enumerate(results):
-        if r.failed or r.ndcg10 is None:
+        if r.failed or r.hr5 is None:
             continue
-        if r.ndcg10 > best_ndcg10:
-            best_ndcg10 = r.ndcg10
+        if r.hr5 > best_hr5:
+            best_hr5 = r.hr5
             best_idx = i
 
-    for i, r in enumerate(results):
+    # Sort rows by HR@5 (descending), keeping failed runs at the bottom.
+    def sort_key(r: ConfigResult):
+        # Failed runs or missing HR@5 get lowest priority.
+        if r.failed or r.hr5 is None:
+            return (1, 0.0)
+        return (0, -r.hr5)
+
+    sorted_results = sorted(results, key=sort_key)
+
+    for i, r in enumerate(sorted_results):
         status = "OK" if not r.failed else "FAIL"
-        mark = "*" if best_idx is not None and i == best_idx and not r.failed else " "
+        # Mark the best config (by HR@5) with '*'.
+        mark = "*" if best_idx is not None and r is results[best_idx] and not r.failed else " "
         row = [
             f"{mark} {r.name}",
-            format_float(r.ndcg5),
-            format_float(r.ndcg10),
-            format_float(r.ndcg50),
             format_float(r.hr5),
             format_float(r.hr10),
-            format_float(r.hr50),
+            format_float(r.ndcg5),
+            format_float(r.ndcg10),
             format_float(r.mrr),
+            format_time_minutes(r.elapsed_sec),
             format_float(r.eval_loss),
             status,
         ]
@@ -171,8 +189,8 @@ def print_summary(results: List[ConfigResult]) -> None:
     if best_idx is not None:
         best = results[best_idx]
         print(
-            f"\nBest config by NDCG@10: {best.name} "
-            f"(NDCG@10={format_float(best.ndcg10)}, MRR={format_float(best.mrr)})"
+            f"\nBest config by HR@5: {best.name} "
+            f"(HR@5={format_float(best.hr5)}, MRR={format_float(best.mrr)})"
         )
     else:
         print("\nNo successful runs to select a best config from.")
@@ -192,14 +210,14 @@ def main() -> None:
     merlin_configs: Dict[str, str] = {
         # SASRec variants
         "sasrec_full_softmax_rated": "configs/merlin/sasrec-gpt-like-full-softmax-mini.gin",
-        # "sasrec_full_softmax_no_ratings": "configs/merlin/sasrec-gpt-like-full-softmax-no-ratings-mini.gin",
-        # "sasrec_sampled_softmax_rated": "configs/merlin/sasrec-gpt-like-sampled-softmax-mini.gin",
-        # "sasrec_full_softmax_rated_mol": "configs/merlin/sasrec-gpt-like-full-softmax-mol-mini.gin",
+        "sasrec_full_softmax_no_ratings": "configs/merlin/sasrec-gpt-like-full-softmax-no-ratings-mini.gin",
+        "sasrec_sampled_softmax_rated": "configs/merlin/sasrec-gpt-like-sampled-softmax-mini.gin",
+        "sasrec_full_softmax_rated_mol": "configs/merlin/sasrec-gpt-like-full-softmax-mol-mini.gin",
         # HSTU variants
         "hstu_full_softmax_rated": "configs/merlin/hstu-gpt-like-full-softmax-mini.gin",
-        # "hstu_full_softmax_no_ratings": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini.gin",
-        # "hstu_sampled_softmax_rated": "configs/merlin/hstu-gpt-like-sampled-softmax-mini.gin",
-        # "hstu_full_softmax_rated_mol": "configs/merlin/hstu-gpt-like-full-softmax-mol-mini.gin",
+        "hstu_full_softmax_no_ratings": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini.gin",
+        "hstu_sampled_softmax_rated": "configs/merlin/hstu-gpt-like-sampled-softmax-mini.gin",
+        "hstu_full_softmax_rated_mol": "configs/merlin/hstu-gpt-like-full-softmax-mol-mini.gin",
     }
 
     results: List[ConfigResult] = []
