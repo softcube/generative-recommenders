@@ -211,7 +211,7 @@ def main() -> None:
         # SASRec variants
         # "sasrec_full_softmax_rated": "configs/merlin/sasrec-gpt-like-full-softmax-mini.gin",
         # "sasrec_full_softmax_no_ratings": "configs/merlin/sasrec-gpt-like-full-softmax-no-ratings-mini.gin",
-        "sasrec_sampled_softmax_rated": "configs/merlin/sasrec-gpt-like-sampled-softmax-mini.gin",
+        # "sasrec_sampled_softmax_rated": "configs/merlin/sasrec-gpt-like-sampled-softmax-mini.gin",
         "sasrec_full_softmax_rated_mol": "configs/merlin/sasrec-gpt-like-full-softmax-mol-mini.gin",
         # HSTU variants
         # "hstu_full_softmax_rated": "configs/merlin/hstu-gpt-like-full-softmax-mini.gin",
