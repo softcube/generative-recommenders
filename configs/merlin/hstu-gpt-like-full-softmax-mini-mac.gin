@@ -86,4 +86,3 @@ train_fn.enable_tf32 = True
 #create_data_loader.num_workers = 0
 create_data_loader.prefetch_factor = 128
 create_data_loader.num_workers = 8
-

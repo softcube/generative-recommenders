@@ -24,7 +24,7 @@ train_fn.max_sequence_length = 20
 train_fn.gr_output_length = 0
 
 # Keep batch size modest for CPU/MPS (can be reduced if needed).
-train_fn.local_batch_size = 128
+train_fn.local_batch_size = 2048
 train_fn.eval_batch_size = 128
 
 # Use HSTU as the main module.
@@ -94,6 +94,9 @@ train_fn.l2_norm_eps = 1e-6
 
 # Eval only after each epoch; keep eval cheap.
 train_fn.eval_interval = 1000000000  # effectively disable mid-epoch eval
+
+create_data_loader.prefetch_factor = 4
+create_data_loader.num_workers = 8
 train_fn.full_eval_every_n = 1       # eval after each epoch
 train_fn.partial_eval_num_iters = 1
 train_fn.save_ckpt_every_n = 1       # save every epoch

@@ -23,7 +23,7 @@ train_fn.max_sequence_length = 20
 train_fn.gr_output_length = 0
 
 # Keep batch size modest for CPU/MPS (can be reduced if needed).
-train_fn.local_batch_size = 128
+train_fn.local_batch_size = 2048
 train_fn.eval_batch_size = 128
 
 # Use SASRec (Transformer) as the main module to mimic GPT.
@@ -78,6 +78,9 @@ create_mol_interaction_module.query_dot_product_groups = 4
 create_mol_interaction_module.item_dot_product_groups = 4
 create_mol_interaction_module.temperature = 1.0
 create_mol_interaction_module.query_dropout_rate = 0.01
+
+create_data_loader.prefetch_factor = 4
+create_data_loader.num_workers = 8
 create_mol_interaction_module.query_hidden_dim = 1024
 create_mol_interaction_module.item_dropout_rate = 0.01
 create_mol_interaction_module.item_hidden_dim = 1024

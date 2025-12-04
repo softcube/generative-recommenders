@@ -24,7 +24,7 @@ train_fn.gr_output_length = 0
 
 # Keep batch size modest for CPU/MPS (can be reduced if needed).
 # For GPU servers (e.g., A10G 24GB), 1024 is usually safe; lower if you hit OOM.
-train_fn.local_batch_size = 4096 #4096
+train_fn.local_batch_size = 2048 #4096
 train_fn.eval_batch_size = 128 #1024
 
 # Use HSTU as the main module.
@@ -94,7 +94,5 @@ train_fn.use_torch_compile = False
 
 # Data loading: use worker subprocesses on GPU servers to reduce CPU bottlenecks.
 # On macOS you can lower num_workers back to 0 if needed.
-#create_data_loader.prefetch_factor = 2
-#create_data_loader.num_workers = 8
 create_data_loader.prefetch_factor = 4
 create_data_loader.num_workers = 8
