@@ -79,11 +79,8 @@ train_fn.partial_eval_num_iters = 1
 train_fn.save_ckpt_every_n = 1       # save every epoch
 train_fn.throughput_log_interval = 100
 
-create_data_loader.prefetch_factor = 4
-create_data_loader.num_workers = 8
-
 train_fn.enable_tf32 = True
 
 # Single-process, no worker subprocesses for macOS.
-create_data_loader.prefetch_factor = 128
+create_data_loader.prefetch_factor = 4
 create_data_loader.num_workers = 8

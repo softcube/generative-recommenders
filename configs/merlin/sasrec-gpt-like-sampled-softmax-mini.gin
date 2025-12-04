@@ -79,8 +79,6 @@ train_fn.l2_norm_eps = 1e-6
 train_fn.eval_interval = 1000000000  # effectively disable mid-epoch eval
 train_fn.full_eval_every_n = 1       # eval after each epoch
 
-create_data_loader.prefetch_factor = 4
-create_data_loader.num_workers = 8
 train_fn.partial_eval_num_iters = 1
 train_fn.save_ckpt_every_n = 1       # save every epoch
 train_fn.throughput_log_interval = 100
@@ -88,5 +86,5 @@ train_fn.throughput_log_interval = 100
 train_fn.enable_tf32 = True
 
 # Single-process, no worker subprocesses for macOS.
-create_data_loader.prefetch_factor = 128
+create_data_loader.prefetch_factor = 4
 create_data_loader.num_workers = 8

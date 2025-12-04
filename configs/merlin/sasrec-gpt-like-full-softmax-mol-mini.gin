@@ -79,8 +79,6 @@ create_mol_interaction_module.item_dot_product_groups = 4
 create_mol_interaction_module.temperature = 1.0
 create_mol_interaction_module.query_dropout_rate = 0.01
 
-create_data_loader.prefetch_factor = 4
-create_data_loader.num_workers = 8
 create_mol_interaction_module.query_hidden_dim = 1024
 create_mol_interaction_module.item_dropout_rate = 0.01
 create_mol_interaction_module.item_hidden_dim = 1024
@@ -104,5 +102,5 @@ train_fn.throughput_log_interval = 100
 train_fn.enable_tf32 = True
 
 # Single-process, no worker subprocesses for macOS.
-create_data_loader.prefetch_factor = 128
+create_data_loader.prefetch_factor = 4
 create_data_loader.num_workers = 8

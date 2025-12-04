@@ -18,6 +18,8 @@ train_fn.max_sequence_length = 20
 train_fn.gr_output_length = 0
 
 # Keep batch size modest for CPU/MPS (can be reduced if needed).
+# For Merlin SASRec on A10G, 1024 is a good balance of
+# throughput and shared-memory usage.
 train_fn.local_batch_size = 2048
 train_fn.eval_batch_size = 128
 
@@ -78,10 +80,8 @@ train_fn.partial_eval_num_iters = 1
 train_fn.save_ckpt_every_n = 1       # save every epoch
 train_fn.throughput_log_interval = 100
 
-create_data_loader.prefetch_factor = 4
-create_data_loader.num_workers = 8
 train_fn.enable_tf32 = True
 
 # Single-process, no worker subprocesses for macOS.
-create_data_loader.prefetch_factor = 128
+create_data_loader.prefetch_factor = 4
 create_data_loader.num_workers = 8
