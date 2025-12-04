@@ -69,8 +69,10 @@ train_fn.top_k_method = "MoLBruteForceTopK"
 # Use full softmax over all items.
 train_fn.loss_module = "FullSoftmaxLoss"
 train_fn.temperature = 1.0
-train_fn.main_module_bf16 = True
-get_similarity_function.bf16_training = True
+# MoL + bfloat16 has triggered CUDA driver errors on this setup,
+# so run this config in full float32.
+train_fn.main_module_bf16 = False
+get_similarity_function.bf16_training = False
 
 # MoL hyperparameters shared with the SASRec MoL config so you can
 # isolate the effect of the main module vs similarity function.
