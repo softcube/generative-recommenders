@@ -64,6 +64,20 @@ class LocalEmbeddingModule(EmbeddingModule):
                 print(f"Skipping initializing params {name} - not configured")
 
     def get_item_embeddings(self, item_ids: torch.Tensor) -> torch.Tensor:
+        # Robustness: clamp any out-of-range item ids to the valid range
+        # to avoid CUDA device-side asserts when evaluation data contains
+        # unseen items. Padding idx is 0, so we map invalid ids there.
+        num_embeddings = self._item_emb.num_embeddings
+        if torch.any((item_ids < 0) | (item_ids >= num_embeddings)):
+            # Log a one-time warning per process.
+            if not hasattr(self, "_warned_oob_ids"):
+                print(
+                    f"[WARN] LocalEmbeddingModule: clamping out-of-range item_ids "
+                    f"to [0, {num_embeddings - 1}]. This usually indicates that "
+                    f"the eval/test split contains item ids unseen in training."
+                )
+                self._warned_oob_ids = True  # type: ignore[attr-defined]
+            item_ids = item_ids.clamp(min=0, max=num_embeddings - 1)
         return self._item_emb(item_ids)
 
     @property

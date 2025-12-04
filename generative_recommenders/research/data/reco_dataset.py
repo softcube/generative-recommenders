@@ -184,9 +184,19 @@ def get_reco_dataset(
         # item id directly from the processed SASRec-format CSV written by
         # MerlinParquetDataProcessor.preprocess_rating().
         item_features = None
-
+        # IMPORTANT: compute the max item id over the union of train/valid/test
+        # splits so the embedding table covers all items seen during evaluation.
         train_csv = dp.sasrec_format_csv_train()
-        df = pd.read_csv(train_csv, delimiter=",")
+        valid_csv = dp.sasrec_format_csv_valid()
+        test_csv = dp.sasrec_format_csv_test()
+        df = pd.concat(
+            [
+                pd.read_csv(train_csv, delimiter=","),
+                pd.read_csv(valid_csv, delimiter=","),
+                pd.read_csv(test_csv, delimiter=","),
+            ],
+            ignore_index=True,
+        )
 
         def _max_from_seq_column(col: pd.Series) -> int:
             max_val = 0
