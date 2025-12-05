@@ -1,0 +1,111 @@
+# HSTU config for Merlin data using:
+# - No rated input features (items only, like hstu-gpt-like-full-softmax-no-ratings-mini.gin)
+# - An EmbeddingAdapter on top of the item embedding table, similar in spirit
+#   to the GPT EmbeddingAdapter:
+#     * Base embedding dim: 1024
+#     * Adapter MLP: 1024 -> 1536 -> 1024
+#     * L2 normalization of adapted embeddings
+#
+# This is intended to bring HSTU closer to your GPT config in terms of
+# capacity and embedding-processing structure.
+#
+# Preprocessing (no prefix expansion; expand_sequences_to_prefixes=False):
+#   python3 preprocess_merlin_data.py
+#
+# Run training as:
+#   python3 main.py \
+#     --gin_config_file=configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-embed.gin \
+#     --master_port=12345
+
+train_fn.dataset_name = "merlin"
+
+# Approximate GPT block size 20: use 20 historical steps.
+train_fn.max_sequence_length = 20
+
+# No extra generative outputs beyond next-item prediction.
+train_fn.gr_output_length = 0
+
+# Batch sizes tuned for A10G; adjust if you hit OOM.
+train_fn.local_batch_size = 2048
+train_fn.eval_batch_size = 128
+
+# Use HSTU as the main module.
+train_fn.main_module = "HSTU"
+
+# Match low dropout from your GPT (0.01).
+train_fn.dropout_rate = 0.01
+train_fn.user_embedding_norm = "l2_norm"
+
+# Do NOT use rated input preprocessor here (items only).
+train_fn.use_rated_input_preproc = False
+
+# Single-epoch run for quick experiments.
+train_fn.num_epochs = 1
+
+# Match GPT-style capacity with wider trainable embeddings.
+# Base embedding dim: 1536 (embedding table)
+# Final model embedding dim: 1024
+train_fn.base_item_embedding_dim = 1536
+train_fn.item_embedding_dim = 1024
+
+# HSTU depth and heads (kept consistent with other Merlin HSTU configs).
+hstu_encoder.num_blocks = 4
+hstu_encoder.num_heads = 2
+
+# Attention and linear dimensions tuned to be in the GPT-like range.
+# dqk is attention_dim per head (total 2 * 512 = 1024).
+hstu_encoder.dqk = 512    # per-head attention dim
+hstu_encoder.dv = 768     # per-head linear dim (total 1536)
+
+# Use small dropout in attention/linear layers.
+hstu_encoder.linear_dropout_rate = 0.01
+hstu_encoder.attn_dropout_rate = 0.01
+
+train_fn.learning_rate = 1e-3
+train_fn.weight_decay = 0
+train_fn.num_warmup_steps = 0
+
+# Dot-product similarity + brute-force top-K, analogous to GPT logits.
+train_fn.interaction_module_type = "DotProduct"
+train_fn.top_k_method = "MIPSBruteForceTopK"
+
+# Use full softmax over all items.
+train_fn.loss_module = "FullSoftmaxLoss"
+train_fn.temperature = 1.0
+train_fn.main_module_bf16 = True
+get_similarity_function.bf16_training = True
+
+# Sampling strategy is ignored by FullSoftmaxLoss but kept for completeness.
+train_fn.sampling_strategy = "local"
+train_fn.item_l2_norm = True
+train_fn.l2_norm_eps = 1e-6
+
+# Eval only after each epoch; keep eval cheap.
+train_fn.eval_interval = 1000000000  # effectively disable mid-epoch eval
+train_fn.full_eval_every_n = 1       # eval after each epoch
+train_fn.partial_eval_num_iters = 1
+train_fn.save_ckpt_every_n = 1       # save every epoch
+train_fn.throughput_log_interval = 100
+
+train_fn.enable_tf32 = True
+
+# EmbeddingAdapter-style processing on the item embedding table:
+#  - Freeze base embedding matrix (1536-dim).
+#  - Apply MLP (1536 -> 1536 -> 1024) + L2 norm.
+train_fn.use_embedding_adapter = True
+train_fn.embedding_adapter_hidden_dim = 1536
+train_fn.embedding_adapter_dropout = 0.01
+train_fn.embedding_adapter_use_bias = True
+
+# Optional: initialize the 1536-dim base embedding matrix from a NumPy file.
+# Provide the absolute or relative path to your .npy file here.
+# The file is expected to contain a 2D array of shape (num_items, 1536)
+# or compatible; extra rows/cols are truncated and missing rows/cols are left
+# as randomly initialized.
+# Example:
+# train_fn.embedding_init_numpy_path = "tmp/merlin/item_embeddings_1536.npy"
+train_fn.embedding_init_numpy_path = "tmp/merlin/embeddings_matrix_remapped.npy"
+
+# Data loading: use worker subprocesses on GPU servers to reduce CPU bottlenecks.
+create_data_loader.prefetch_factor = 4
+create_data_loader.num_workers = 8

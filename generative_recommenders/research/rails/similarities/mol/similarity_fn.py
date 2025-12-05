@@ -33,6 +33,7 @@ from generative_recommenders.research.rails.similarities.mol.embeddings_fn impor
 
 # NOTE: torch.compile has caused CUDA driver errors on some setups.
 # Use a plain Python function here for robustness.
+@torch.compile(dynamic=True)
 def _softmax_dropout_combiner_fn(
     x: torch.Tensor,
     y: torch.Tensor,

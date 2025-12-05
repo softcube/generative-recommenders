@@ -464,6 +464,11 @@ class MerlinParquetDataProcessor(DataProcessor):
         # By default this is disabled and we keep the original behavior
         # of one sequence per row.
         self._expand_sequences_to_prefixes: bool = expand_sequences_to_prefixes
+        # Optional: paths for remapping an external raw-id-indexed
+        # embedding matrix into the Merlin remapped id space.
+        # These can be set by caller code (e.g., preprocess_merlin_data.py).
+        self._raw_embeddings_path: Optional[str] = None
+        self._output_remapped_embeddings_path: Optional[str] = None
 
     def expected_num_unique_items(self) -> Optional[int]:
         return self._num_unique_items
@@ -489,6 +494,88 @@ class MerlinParquetDataProcessor(DataProcessor):
 
     def sasrec_format_csv_test(self) -> str:
         return f"tmp/{self._prefix}/sasrec_format_test.csv"
+
+    def _remap_external_embeddings(
+        self,
+        remapped_item_ids: Dict[int, int],
+    ) -> None:
+        """
+        Optionally remap an external embedding matrix from raw-id indexing
+        into the Merlin remapped id space, using the same mapping constructed
+        for item ids in this preprocessor.
+
+        We expect:
+          - self._raw_embeddings_path: path to a .npy file where row i
+            contains the embedding for *raw* Merlin item id i.
+          - self._output_remapped_embeddings_path: output .npy path.
+
+        The output matrix will have shape (num_items + 1, D) where:
+          - row 0 is reserved for padding (zeros),
+          - row idx + 1 contains the embedding for remapped id idx,
+            copied from raw[row_old_id].
+        """
+        if not self._raw_embeddings_path or not self._output_remapped_embeddings_path:
+            return
+
+        raw_path = self._raw_embeddings_path
+        out_path = self._output_remapped_embeddings_path
+
+        if not os.path.exists(raw_path):
+            raise FileNotFoundError(
+                f"MerlinParquetDataProcessor: raw embeddings file not found: {raw_path}"
+            )
+
+        logging.info(
+            "MerlinParquetDataProcessor: remapping external embeddings from "
+            f"raw ids using file '{raw_path}'"
+        )
+        raw_emb = np.load(raw_path)
+        if raw_emb.ndim != 2:
+            raise ValueError(
+                f"MerlinParquetDataProcessor: expected 2D array for raw embeddings, "
+                f"got shape {raw_emb.shape}"
+            )
+
+        num_raw_items, emb_dim = raw_emb.shape
+        num_items = len(remapped_item_ids)
+        logging.info(
+            "MerlinParquetDataProcessor: raw embeddings shape %s, "
+            "num_unique_items=%d",
+            raw_emb.shape,
+            num_items,
+        )
+
+        # Allocate +1 for padding row at index 0.
+        remapped_emb = np.zeros((num_items + 1, emb_dim), dtype=raw_emb.dtype)
+
+        missing_raw_ids = []
+        for old_id, idx in remapped_item_ids.items():
+            if old_id < 0 or old_id >= num_raw_items:
+                missing_raw_ids.append(old_id)
+                continue
+            remapped_emb[idx + 1] = raw_emb[old_id]
+
+        # for padding
+        remapped_emb[0] = raw_emb[0]
+
+        if missing_raw_ids:
+            missing_raw_ids = sorted(set(missing_raw_ids))
+            raise ValueError(
+                f"MerlinParquetDataProcessor: {len(missing_raw_ids)} raw item_ids "
+                f"are out of range for the raw embeddings matrix from '{raw_path}'. "
+                f"Example missing ids: {missing_raw_ids[:10]}"
+            )
+
+        out_dir = os.path.dirname(out_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        np.save(out_path, remapped_emb)
+        logging.info(
+            "MerlinParquetDataProcessor: wrote remapped embeddings to '%s' "
+            "with shape %s",
+            out_path,
+            remapped_emb.shape,
+        )
 
     def preprocess_rating(self) -> int:
         import itertools
@@ -526,7 +613,7 @@ class MerlinParquetDataProcessor(DataProcessor):
         all_item_ids = set(
             itertools.chain.from_iterable(data["item_id_list_seq"].tolist())
         )
-        remapped_item_ids = {
+        remapped_item_ids: Dict[int, int] = {
             old_id: idx for idx, old_id in enumerate(sorted(all_item_ids))
         }
         self._num_unique_items = len(remapped_item_ids)
@@ -535,6 +622,16 @@ class MerlinParquetDataProcessor(DataProcessor):
             return [remapped_item_ids[int(x)] for x in seq]
 
         data["item_ids"] = data["item_id_list_seq"].apply(remap_items)
+
+        # Optionally remap an external raw-id-indexed embedding matrix into
+        # the same remapped id space, if paths have been configured by the
+        # caller (e.g., preprocess_merlin_data.py).
+        try:
+            self._remap_external_embeddings(remapped_item_ids)
+        except Exception:
+            logging.exception(
+                "MerlinParquetDataProcessor: failed to remap external embeddings"
+            )
 
         # Remap event types (item_event_name_list_seq) to a contiguous range
         # [0..num_event_types-1] and use them as "ratings" (extra features).

@@ -250,8 +250,21 @@ class FullSoftmaxLoss(AutoregressiveLoss):
         flat_weights = supervision_weights[valid_mask]  # [N_valid]
 
         # Get global item embeddings from the model's embedding module.
-        # Assumes a LocalEmbeddingModule-style interface.
-        item_emb = self._model._embedding_module._item_emb.weight  # type: ignore[attr-defined]
+        # When an embedding adapter is used, we must apply it to the full
+        # embedding table to obtain the adapted item embeddings (similar to
+        # GPT's EmbeddingAdapter logic).
+        embedding_module = self._model._embedding_module  # type: ignore[attr-defined]
+        base_weight = embedding_module._item_emb.weight  # type: ignore[attr-defined]
+
+        if getattr(embedding_module, "_use_adapter", False):
+            num_embeddings = base_weight.size(0)
+            all_ids = torch.arange(
+                num_embeddings, device=device, dtype=torch.long
+            )
+            item_emb = embedding_module.get_item_embeddings(all_ids)
+        else:
+            item_emb = base_weight
+
         item_emb = item_emb.to(device=device, dtype=flat_outputs.dtype)
 
         if item_emb.size(1) != D:

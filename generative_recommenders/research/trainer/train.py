@@ -158,12 +158,18 @@ def train_fn(
     partial_eval_num_iters: int = 32,
     embedding_module_type: str = "local",
     item_embedding_dim: int = 240,
+    base_item_embedding_dim: int = 0,
     interaction_module_type: str = "",
     gr_output_length: int = 10,
     l2_norm_eps: float = 1e-6,
     enable_tf32: bool = False,
     random_seed: int = 42,
     use_torch_compile: bool = False,
+    use_embedding_adapter: bool = False,
+    embedding_adapter_hidden_dim: int = 0,
+    embedding_adapter_dropout: float = 0.0,
+    embedding_adapter_use_bias: bool = True,
+    embedding_init_numpy_path: str = "",
 ) -> None:
     # Ensure INFO-level logs are visible when running in worker processes
     # (e.g., under torch.multiprocessing.spawn on GPU servers).
@@ -282,6 +288,12 @@ def train_fn(
         embedding_module: EmbeddingModule = LocalEmbeddingModule(
             num_items=dataset.max_item_id,
             item_embedding_dim=item_embedding_dim,
+             base_item_embedding_dim=base_item_embedding_dim,
+            use_embedding_adapter=use_embedding_adapter,
+            embedding_adapter_hidden_dim=embedding_adapter_hidden_dim,
+            embedding_adapter_dropout=embedding_adapter_dropout,
+            embedding_adapter_use_bias=embedding_adapter_use_bias,
+            embedding_init_numpy_path=embedding_init_numpy_path,
         )
     else:
         raise ValueError(f"Unknown embedding_module_type {embedding_module_type}")
