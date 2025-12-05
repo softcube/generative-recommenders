@@ -178,7 +178,10 @@ class LocalEmbeddingModule(EmbeddingModule):
             adapted = self._adapter(embeddings_flat)
             # L2 normalize
             adapted = F.normalize(adapted, p=2.0, dim=-1, eps=1e-12)
-            embeddings = adapted.view(orig_shape)
+            # The adapter can change the embedding dimension from
+            # _base_item_embedding_dim to self._item_embedding_dim. We must
+            # reshape using the *final* embedding dim, not the base dim.
+            embeddings = adapted.view(*orig_shape[:-1], self._item_embedding_dim)
         return embeddings
 
     @property

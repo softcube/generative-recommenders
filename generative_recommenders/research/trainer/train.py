@@ -355,6 +355,13 @@ def train_fn(
     )
     model_debug_str = model.debug_str()
 
+    # Debug: print which embedding-module parameters are trainable.
+    try:
+        for name, params in model._embedding_module.named_parameters():  # pyre-ignore[16]
+            print(f"[DEBUG] embedding_param {name}: requires_grad={params.requires_grad}")
+    except Exception:
+        logging.warning("Failed to inspect embedding module parameters for requires_grad.")
+
     # loss
     loss_debug_str = loss_module
     if loss_module == "BCELoss":
