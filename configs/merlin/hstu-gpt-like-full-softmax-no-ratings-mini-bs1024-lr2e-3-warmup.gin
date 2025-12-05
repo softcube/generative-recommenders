@@ -1,0 +1,89 @@
+# HSTU config approximating your small GPT-style transformer
+# on Merlin session data in tmp/merlin, using full softmax loss,
+# WITHOUT using event-type features (ratings) as inputs.
+#
+# Variant: medium batch size (1024) with moderately higher learning rate (2e-3)
+# and warmup, as a middle ground between stability and fast HR@5 gains.
+#
+# Preprocessing (no prefix expansion; expand_sequences_to_prefixes=False):
+#   python3 preprocess_merlin_data.py
+#
+# Run training as:
+#   python3 main.py \
+#     --gin_config_file=configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr2e-3-warmup.gin \
+#     --master_port=12345
+
+train_fn.dataset_name = "merlin"
+
+# Approximate GPT block size 20: use 20 historical steps.
+train_fn.max_sequence_length = 20
+
+# No extra generative outputs beyond next-item prediction.
+train_fn.gr_output_length = 0
+
+# Medium batch size for a trade-off between updates and throughput.
+train_fn.local_batch_size = 1024
+train_fn.eval_batch_size = 128
+
+# Use HSTU as the main module.
+train_fn.main_module = "HSTU"
+
+# Match low dropout from your GPT (0.01).
+train_fn.dropout_rate = 0.01
+train_fn.user_embedding_norm = "l2_norm"
+
+# Do NOT use rated input preprocessor here.
+train_fn.use_rated_input_preproc = False
+
+# Ten epochs for a reasonable training run.
+train_fn.num_epochs = 10
+
+# Match GPT-style capacity with smaller trainable embeddings.
+train_fn.item_embedding_dim = 256
+
+# HSTU depth and heads.
+hstu_encoder.num_blocks = 4
+hstu_encoder.num_heads = 2
+
+# Attention and linear dimensions chosen to approximate GPT block capacity.
+hstu_encoder.dqk = 256   # attention_dim per head (total 512)
+hstu_encoder.dv = 768    # linear_dim per head (total 1536)
+
+# Use small dropout in attention/linear layers.
+hstu_encoder.linear_dropout_rate = 0.01
+hstu_encoder.attn_dropout_rate = 0.01
+
+# Moderately higher learning rate plus warmup.
+train_fn.learning_rate = 2e-3
+train_fn.weight_decay = 0
+# Warm up over ~1.5k steps.
+train_fn.num_warmup_steps = 1500
+
+# Dot-product similarity + brute-force top-K, analogous to GPT logits.
+train_fn.interaction_module_type = "DotProduct"
+train_fn.top_k_method = "MIPSBruteForceTopK"
+
+# Use full softmax over all items.
+train_fn.loss_module = "FullSoftmaxLoss"
+train_fn.temperature = 1.0
+train_fn.main_module_bf16 = True
+get_similarity_function.bf16_training = True
+
+# Sampling strategy is ignored by FullSoftmaxLoss but kept for completeness.
+train_fn.sampling_strategy = "local"
+train_fn.item_l2_norm = True
+train_fn.l2_norm_eps = 1e-6
+
+# Eval only after each epoch; keep eval cheap.
+train_fn.eval_interval = 1000000000  # effectively disable mid-epoch eval
+train_fn.full_eval_every_n = 1       # eval after each epoch
+train_fn.partial_eval_num_iters = 1
+
+train_fn.save_ckpt_every_n = 1       # save every epoch
+train_fn.throughput_log_interval = 100
+
+train_fn.enable_tf32 = True
+
+create_data_loader.prefetch_factor = 4
+create_data_loader.num_workers = 8
+

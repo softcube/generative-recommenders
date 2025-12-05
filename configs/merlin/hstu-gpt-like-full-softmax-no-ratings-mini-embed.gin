@@ -40,7 +40,7 @@ train_fn.user_embedding_norm = "l2_norm"
 train_fn.use_rated_input_preproc = False
 
 # Single-epoch run for quick experiments.
-train_fn.num_epochs = 1
+train_fn.num_epochs = 10
 
 # Match GPT-style capacity with wider trainable embeddings.
 # Base embedding dim: 1536 (embedding table)
