@@ -31,7 +31,8 @@ from generative_recommenders.research.rails.similarities.mol.embeddings_fn impor
 )
 
 
-@torch.compile(dynamic=True)
+# NOTE: torch.compile has caused CUDA driver errors on some setups.
+# Use a plain Python function here for robustness.
 def _softmax_dropout_combiner_fn(
     x: torch.Tensor,
     y: torch.Tensor,
@@ -49,7 +50,8 @@ def _softmax_dropout_combiner_fn(
     return x, (x * y).sum(-1)
 
 
-@torch.compile
+# NOTE: torch.compile has caused CUDA driver errors on some setups.
+# Use a plain Python function here for robustness.
 def _load_balancing_mi_loss_fn(
     gating_prs: torch.Tensor,
     eps: float,
