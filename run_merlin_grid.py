@@ -216,12 +216,15 @@ def main() -> None:
         # HSTU variants
         # "hstu_full_softmax_rated": "configs/merlin/hstu-gpt-like-full-softmax-mini.gin",
 
-        "hstu_full_softmax_no_ratings_embed": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-embed.gin",
-        "hstu_full_softmax_no_ratings": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini.gin",
-        "hstu_full_softmax_no_ratings_bs512_lr1e-3": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs512-lr1e-3.gin",
-        "hstu_full_softmax_no_ratings_bs512_lr3e-3_warmup": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs512-lr3e-3-warmup.gin",
-        "hstu_full_softmax_no_ratings_bs1024_lr2e-3_warmup": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr2e-3-warmup.gin",
+        # "hstu_full_softmax_no_ratings_embed": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-embed.gin",
+        # "hstu_full_softmax_no_ratings": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini.gin",
+        # "hstu_full_softmax_no_ratings_bs512_lr1e-3": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs512-lr1e-3.gin",
+        # "hstu_full_softmax_no_ratings_bs512_lr3e-3_warmup": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs512-lr3e-3-warmup.gin",
+        # "hstu_full_softmax_no_ratings_bs1024_lr2e-3_warmup": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr2e-3-warmup.gin",
 
+        "hstu_full_softmax_no_ratings_bs1024_lr666e-5_warmup": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-warmup.gin",
+        "hstu_full_softmax_no_ratings_bs1024_lr666e-5": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5.gin",
+        "hstu_full_softmax_no_ratings_bs128_lr666e-5_warmup": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs128-lr666e-5-warmup.gin",
         # "hstu_sampled_softmax_rated": "configs/merlin/hstu-gpt-like-sampled-softmax-mini.gin",
         # "hstu_full_softmax_rated_mol": "configs/merlin/hstu-gpt-like-full-softmax-mol-mini.gin",
     }

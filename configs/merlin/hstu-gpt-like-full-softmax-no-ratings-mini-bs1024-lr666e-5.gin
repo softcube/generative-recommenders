@@ -36,7 +36,7 @@ train_fn.user_embedding_norm = "l2_norm"
 train_fn.use_rated_input_preproc = False
 
 # Ten epochs for a reasonable training run.
-train_fn.num_epochs = 10
+train_fn.num_epochs = 5
 
 # Match GPT-style capacity with smaller trainable embeddings.
 train_fn.item_embedding_dim = 256
@@ -54,10 +54,10 @@ hstu_encoder.linear_dropout_rate = 0.01
 hstu_encoder.attn_dropout_rate = 0.01
 
 # Moderately higher learning rate plus warmup.
-train_fn.learning_rate = 2e-3
+train_fn.learning_rate = 666e-5
 train_fn.weight_decay = 0
 # Warm up over ~1.5k steps.
-train_fn.num_warmup_steps = 1500
+train_fn.num_warmup_steps = 0
 
 # Dot-product similarity + brute-force top-K, analogous to GPT logits.
 train_fn.interaction_module_type = "DotProduct"
