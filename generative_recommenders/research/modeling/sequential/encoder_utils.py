@@ -28,6 +28,9 @@ from generative_recommenders.research.modeling.sequential.output_postprocessors 
     OutputPostprocessorModule,
 )
 from generative_recommenders.research.modeling.sequential.sasrec import SASRec
+from generative_recommenders.research.modeling.sequential.gpt_encoder import (
+    GPTSequentialEncoder,
+)
 from generative_recommenders.research.modeling.similarity_module import (
     SequentialEncoderWithLearnedSimilarityModule,
 )
@@ -114,6 +117,42 @@ def hstu_encoder(
 
 
 @gin.configurable
+def gpt_encoder(
+    max_sequence_length: int,
+    max_output_length: int,
+    embedding_module: EmbeddingModule,
+    similarity_module: SimilarityModule,
+    input_preproc_module: InputFeaturesPreprocessorModule,
+    output_postproc_module: OutputPostprocessorModule,
+    activation_checkpoint: bool,
+    verbose: bool,
+    num_layers: int = 4,
+    num_heads: int = 2,
+    ffn_hidden_dim: int = 1024,
+    ffn_activation_fn: str = "gelu",
+    attn_dropout_rate: float = 0.01,
+    ffn_dropout_rate: float = 0.01,
+) -> SequentialEncoderWithLearnedSimilarityModule:
+    return GPTSequentialEncoder(
+        max_sequence_len=max_sequence_length,
+        max_output_len=max_output_length,
+        embedding_dim=embedding_module.item_embedding_dim,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        ffn_hidden_dim=ffn_hidden_dim,
+        ffn_activation_fn=ffn_activation_fn,
+        attn_dropout_rate=attn_dropout_rate,
+        ffn_dropout_rate=ffn_dropout_rate,
+        embedding_module=embedding_module,
+        similarity_module=similarity_module,  # pyre-ignore [6]
+        input_features_preproc_module=input_preproc_module,
+        output_postprocessor_module=output_postproc_module,
+        activation_checkpoint=activation_checkpoint,
+        verbose=verbose,
+    )
+
+
+@gin.configurable
 def get_sequential_encoder(
     module_type: str,
     max_sequence_length: int,
@@ -150,6 +189,17 @@ def get_sequential_encoder(
         )
     elif module_type == "HSTU":
         model = hstu_encoder(
+            max_sequence_length=max_sequence_length,
+            max_output_length=max_output_length,
+            embedding_module=embedding_module,
+            similarity_module=interaction_module,
+            input_preproc_module=input_preproc_module,
+            output_postproc_module=output_postproc_module,
+            activation_checkpoint=activation_checkpoint,
+            verbose=verbose,
+        )
+    elif module_type == "GPT":
+        model = gpt_encoder(
             max_sequence_length=max_sequence_length,
             max_output_length=max_output_length,
             embedding_module=embedding_module,
