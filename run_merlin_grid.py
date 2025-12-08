@@ -240,9 +240,12 @@ def main() -> None:
 
         # "hstu_full_softmax_no_ratings_bs1024_lr666e-5_warmup": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-warmup.gin",
         # "hstu_full_softmax_no_ratings_bs1024_lr666e-5": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5.gin",
-        "hstu_full_softmax_no_ratings_bs1024_lr666e-5-emb128": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-emb128.gin",
-        "hstu_full_softmax_no_ratings_bs1024_lr666e-5-emb512": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-emb512.gin",
-        "hstu_full_softmax_no_ratings_bs1024_lr666e-5-encoder": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-encoder.gin",
+        # "hstu_full_softmax_no_ratings_bs1024_lr666e-5-emb128": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-emb128.gin",
+        # "hstu_full_softmax_no_ratings_bs1024_lr666e-5-emb512": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-emb512.gin",
+        # "hstu_full_softmax_no_ratings_bs1024_lr666e-5-encoder": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-encoder.gin",
+
+        "gpt_full_softmax_no_ratings_bs1024_lr666e-5-emb512": "configs/merlin/gpt-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-emb512.gin",
+        "gpt_full_softmax_no_ratings_bs1024_lr666e-5-emb512-adapter": "configs/merlin/gpt-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-emb512-adapter.gin",
 
         # "hstu_full_softmax_no_ratings_bs128_lr666e-5_warmup": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs128-lr666e-5-warmup.gin",
         # "hstu_sampled_softmax_rated": "configs/merlin/hstu-gpt-like-sampled-softmax-mini.gin",

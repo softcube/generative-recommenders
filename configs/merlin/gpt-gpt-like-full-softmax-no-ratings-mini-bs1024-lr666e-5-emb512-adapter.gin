@@ -1,0 +1,108 @@
+# HSTU config approximating your small GPT-style transformer
+# on Merlin session data in tmp/merlin, using full softmax loss,
+# WITHOUT using event-type features (ratings) as inputs.
+#
+# Variant: medium batch size (1024) with moderately higher learning rate (2e-3)
+# and warmup, as a middle ground between stability and fast HR@5 gains.
+#
+# Preprocessing (no prefix expansion; expand_sequences_to_prefixes=False):
+#   python3 preprocess_merlin_data.py
+#
+# Run training as:
+#   python3 main.py \
+#     --gin_config_file=configs/merlin/gpt-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-emb512.gin \
+#     --master_port=12345
+
+train_fn.dataset_name = "merlin"
+
+# Approximate GPT block size 20: use 20 historical steps.
+train_fn.max_sequence_length = 20
+
+# No extra generative outputs beyond next-item prediction.
+train_fn.gr_output_length = 0
+
+# Medium batch size for a trade-off between updates and throughput.
+train_fn.local_batch_size = 1024
+train_fn.eval_batch_size = 128
+
+# Use GPT-style sequential encoder as the main module.
+train_fn.main_module = "GPT"
+
+# Match low dropout from your GPT (0.01).
+train_fn.dropout_rate = 0.01
+train_fn.user_embedding_norm = "l2_norm"
+
+# Do NOT use rated input preprocessor here.
+train_fn.use_rated_input_preproc = False
+
+# Ten epochs for a reasonable training run.
+train_fn.num_epochs = 5
+
+# Match GPT-style capacity with smaller trainable embeddings.
+train_fn.base_item_embedding_dim = 1536
+train_fn.item_embedding_dim = 1024
+
+# GPT depth and heads (mirroring the HSTU configuration).
+gpt_encoder.num_layers = 4
+gpt_encoder.num_heads = 2
+
+# Attention and linear dimensions tuned to be in the GPT-like range.
+# dqk is attention_dim per head (total 2 * 512 = 1024).
+hstu_encoder.dqk = 512    # per-head attention dim
+hstu_encoder.dv = 768     # per-head linear dim (total 1536)
+
+# Use small dropout in attention/FFN layers.
+gpt_encoder.attn_dropout_rate = 0.01
+gpt_encoder.ffn_dropout_rate = 0.01
+
+# Moderately higher learning rate plus warmup.
+train_fn.learning_rate = 666e-5
+train_fn.weight_decay = 0
+# Warm up over ~1.5k steps.
+train_fn.num_warmup_steps = 0
+
+# Dot-product similarity + brute-force top-K, analogous to GPT logits.
+train_fn.interaction_module_type = "DotProduct"
+train_fn.top_k_method = "MIPSBruteForceTopK"
+
+# Use full softmax over all items.
+train_fn.loss_module = "FullSoftmaxLoss"
+train_fn.temperature = 1.0
+train_fn.main_module_bf16 = True
+get_similarity_function.bf16_training = True
+
+# Sampling strategy is ignored by FullSoftmaxLoss but kept for completeness.
+train_fn.sampling_strategy = "local"
+train_fn.item_l2_norm = True
+train_fn.l2_norm_eps = 1e-6
+
+# Eval only after each epoch; keep eval cheap.
+train_fn.eval_interval = 1000000000  # effectively disable mid-epoch eval
+train_fn.full_eval_every_n = 1       # eval after each epoch
+train_fn.partial_eval_num_iters = 1
+
+train_fn.save_ckpt_every_n = 100       # save every epoch
+train_fn.throughput_log_interval = 100
+
+train_fn.enable_tf32 = True
+
+# EmbeddingAdapter-style processing on the item embedding table:
+#  - Freeze base embedding matrix (1536-dim).
+#  - Apply MLP (1536 -> 1536 -> 1024) + L2 norm.
+train_fn.use_embedding_adapter = True
+train_fn.embedding_adapter_hidden_dim = 1536
+train_fn.embedding_adapter_dropout = 0.01
+train_fn.embedding_adapter_use_bias = True
+
+# Optional: initialize the 1536-dim base embedding matrix from a NumPy file.
+# Provide the absolute or relative path to your .npy file here.
+# The file is expected to contain a 2D array of shape (num_items, 1536)
+# or compatible; extra rows/cols are truncated and missing rows/cols are left
+# as randomly initialized.
+# Example:
+# train_fn.embedding_init_numpy_path = "tmp/merlin/item_embeddings_1536.npy"
+train_fn.embedding_init_numpy_path = "tmp/merlin/embeddings_matrix_remapped.npy"
+
+# Data loading: use worker subprocesses on GPU servers to reduce CPU bottlenecks.
+create_data_loader.prefetch_factor = 4
+create_data_loader.num_workers = 8
