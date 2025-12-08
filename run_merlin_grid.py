@@ -56,8 +56,15 @@ def run_config(config: ConfigResult) -> ConfigResult:
         "--master_port",
         "12345",
     ]
+    # Logs go under ./logs/merlin relative to the current working directory.
+    log_dir = Path("logs") / "merlin"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    # configs/merlin/foo.gin -> logs/merlin/foo
+    log_path = log_dir / config.config_path.stem
+
     print(f"\n=== Running config: {config.name} ===")
     print("Command:", " ".join(cmd))
+    print(f"Logging raw output to: {log_path}")
 
     start_time = time.time()
     try:
@@ -76,9 +83,18 @@ def run_config(config: ConfigResult) -> ConfigResult:
 
     assert proc.stdout is not None
     lines: List[str] = []
-    for line in proc.stdout:
-        print(line, end="")
-        lines.append(line)
+
+    # Mirror stdout to both console and log file.
+    with log_path.open("w", encoding="utf-8") as log_f:
+        log_f.write(f"=== Running config: {config.name} ===\n")
+        log_f.write("Command: " + " ".join(cmd) + "\n")
+
+        for line in proc.stdout:
+            print(line, end="")  # console
+            log_f.write(line)    # file
+            log_f.flush()
+            lines.append(line)   # for parsing
+
     proc.wait()
     config.elapsed_sec = time.time() - start_time
 
