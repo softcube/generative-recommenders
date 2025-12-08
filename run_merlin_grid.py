@@ -223,7 +223,7 @@ def main() -> None:
         # "hstu_full_softmax_no_ratings_bs1024_lr2e-3_warmup": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr2e-3-warmup.gin",
 
         # "hstu_full_softmax_no_ratings_bs1024_lr666e-5_warmup": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-warmup.gin",
-        "hstu_full_softmax_no_ratings_bs1024_lr666e-5": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5.gin",
+        # "hstu_full_softmax_no_ratings_bs1024_lr666e-5": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5.gin",
         "hstu_full_softmax_no_ratings_bs1024_lr666e-5-emb128": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-emb128.gin",
         "hstu_full_softmax_no_ratings_bs1024_lr666e-5-emb512": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-emb512.gin",
         "hstu_full_softmax_no_ratings_bs1024_lr666e-5-encoder": "configs/merlin/hstu-gpt-like-full-softmax-no-ratings-mini-bs1024-lr666e-5-encoder.gin",
