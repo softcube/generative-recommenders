@@ -116,7 +116,37 @@ def eval_metrics_v2_from_tensors(
         shared_input_embeddings = shared_input_embeddings.to(dtype)
 
     MAX_K = 2500000
-    k = min(MAX_K, eval_state.candidate_index.ids.size(1))
+    num_objects = eval_state.candidate_index.ids.size(1)
+
+    # When filtering invalid ids (e.g., previously seen items), we must ensure that
+    # the downstream top-k selection logic is able to oversample by the maximum
+    # number of invalid ids per row. Otherwise it may not be able to find `k`
+    # valid items for every row, which breaks the assumption in
+    # `CandidateIndex.get_top_k_outputs` that each row has exactly `k` valid
+    # entries after masking.
+    max_num_invalid_ids = 0
+    if filter_invalid_ids:
+        max_num_invalid_ids = seq_features.past_ids.size(1)
+        # If the history is as large as (or larger than) the candidate set,
+        # disable filtering to avoid degenerate cases where there are no
+        # remaining valid items.
+        if num_objects <= max_num_invalid_ids:
+            logging.warning(
+                "Number of candidate items (%d) is <= max_num_invalid_ids (%d); "
+                "disabling filter_invalid_ids for eval.",
+                num_objects,
+                max_num_invalid_ids,
+            )
+            filter_invalid_ids = False
+            max_num_invalid_ids = 0
+
+    if filter_invalid_ids:
+        # Ensure that k + max_num_invalid_ids <= num_objects so that
+        # `CandidateIndex.get_top_k_outputs` can oversample and still return
+        # exactly k valid ids per row after filtering.
+        k = min(MAX_K, num_objects - max_num_invalid_ids)
+    else:
+        k = min(MAX_K, num_objects)
     user_max_batch_size = user_max_batch_size or shared_input_embeddings.size(0)
     num_batches = (
         shared_input_embeddings.size(0) + user_max_batch_size - 1
