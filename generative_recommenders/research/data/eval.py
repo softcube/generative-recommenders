@@ -115,7 +115,7 @@ def eval_metrics_v2_from_tensors(
     if dtype is not None:
         shared_input_embeddings = shared_input_embeddings.to(dtype)
 
-    MAX_K = 2500
+    MAX_K = 2500000
     k = min(MAX_K, eval_state.candidate_index.ids.size(1))
     user_max_batch_size = user_max_batch_size or shared_input_embeddings.size(0)
     num_batches = (

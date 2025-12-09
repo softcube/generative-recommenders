@@ -26,7 +26,7 @@ train_fn.local_batch_size = 1024
 train_fn.eval_batch_size = 128
 
 # Use GPT-style sequential encoder as the main module.
-train_fn.main_module = "GPT"
+train_fn.main_module = "HSTU"
 
 # Match low dropout from your GPT (0.01).
 train_fn.dropout_rate = 0.01
