@@ -85,7 +85,7 @@ def _main_func(
     metrics = MetricsLogger(
         multitask_configs=model_configs.multitask_configs,
         batch_size=train_dataloader.batch_size,
-        window_size=2500,
+        window_size=2500000,
         device=device,
         rank=rank,
     )
